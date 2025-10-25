@@ -35,6 +35,7 @@ app.use(cors({
   origin: [
     process.env.CLIENT_URL || "http://localhost:3000",
     "https://darling-druid-4e85af.netlify.app",
+    "https://visionary-lebkuchen-a7e181.netlify.app",
     "https://*.netlify.app"
   ],
   credentials: true
