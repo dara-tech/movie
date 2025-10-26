@@ -45,6 +45,7 @@ app.use(express.urlencoded({ extended: true }));
 
 // Routes
 app.use('/api/movies', movieRoutes);
+app.use('/api/tvshows', require('./routes/tvshows'));
 app.use('/api/genres', genreRoutes);
 app.use('/api/watchlist', watchlistRoutes);
 app.use('/api/history', historyRoutes);
@@ -53,6 +54,7 @@ app.use('/api/sync', syncRoutes);
 app.use('/api/vidsrc', vidsrcRoutes);
 app.use('/api/auto-sync', autoSyncRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/search', require('./routes/search'));
 
 // Serve static files from React build
 if (process.env.NODE_ENV === 'production') {

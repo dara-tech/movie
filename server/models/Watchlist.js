@@ -8,7 +8,15 @@ const watchlistSchema = new mongoose.Schema({
   },
   movie: {
     type: mongoose.Schema.Types.ObjectId,
-    ref: 'Movie',
+    ref: 'Movie'
+  },
+  tvShow: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'TvShow'
+  },
+  type: {
+    type: String,
+    enum: ['movie', 'tvshow'],
     required: true
   },
   addedAt: {
@@ -17,8 +25,8 @@ const watchlistSchema = new mongoose.Schema({
   },
   status: {
     type: String,
-    enum: ['want_to_watch', 'watching', 'watched'],
-    default: 'want_to_watch'
+    enum: ['plan_to_watch', 'watching', 'completed', 'dropped'],
+    default: 'plan_to_watch'
   },
   rating: {
     type: Number,
@@ -30,10 +38,21 @@ const watchlistSchema = new mongoose.Schema({
   },
   watchedAt: {
     type: Date
+  },
+  progress: {
+    currentEpisode: {
+      type: Number,
+      default: 0
+    },
+    currentSeason: {
+      type: Number,
+      default: 1
+    }
   }
 });
 
-// Ensure one movie per user in watchlist
-watchlistSchema.index({ user: 1, movie: 1 }, { unique: true });
+// Ensure one item per user in watchlist (either movie or tvshow)
+watchlistSchema.index({ user: 1, movie: 1 }, { unique: true, partialFilterExpression: { movie: { $exists: true } } });
+watchlistSchema.index({ user: 1, tvShow: 1 }, { unique: true, partialFilterExpression: { tvShow: { $exists: true } } });
 
 module.exports = mongoose.model('Watchlist', watchlistSchema);

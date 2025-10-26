@@ -2,6 +2,31 @@ const express = require('express');
 const router = express.Router();
 const Movie = require('../models/Movie');
 const Genre = require('../models/Genre');
+
+// Simple in-memory cache
+const cache = new Map();
+const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
+// Cache helper functions
+const getCacheKey = (req) => {
+  const { page, limit, genre, year, sortBy, order, search, minRating } = req.query;
+  return `movies:${JSON.stringify({ page, limit, genre, year, sortBy, order, search, minRating })}`;
+};
+
+const getCachedData = (key) => {
+  const cached = cache.get(key);
+  if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+    return cached.data;
+  }
+  return null;
+};
+
+const setCachedData = (key, data) => {
+  cache.set(key, {
+    data,
+    timestamp: Date.now()
+  });
+};
 const Watchlist = require('../models/Watchlist');
 const WatchHistory = require('../models/WatchHistory');
 const auth = require('../middleware/auth');
@@ -37,6 +62,15 @@ router.post('/', async (req, res) => {
 // Get all movies with pagination and filtering
 router.get('/', async (req, res) => {
   try {
+    // Check cache first
+    const cacheKey = getCacheKey(req);
+    const cachedData = getCachedData(cacheKey);
+    
+    if (cachedData) {
+      console.log('📦 Serving from cache:', cacheKey);
+      return res.json(cachedData);
+    }
+
     const {
       page = 1,
       limit = 20,
@@ -44,7 +78,8 @@ router.get('/', async (req, res) => {
       year,
       sortBy = 'popularity',
       order = 'desc',
-      search
+      search,
+      minRating
     } = req.query;
 
     // Handle multiple genre parameters
@@ -67,11 +102,19 @@ router.get('/', async (req, res) => {
       query.releaseDate = { $gte: startDate, $lte: endDate };
     }
     
-    // Add search filter
+    // Add rating filter
+    if (minRating) {
+      query.voteAverage = { $gte: parseFloat(minRating) };
+    }
+
+    // Add search filter with improved performance
     if (search) {
+      const searchRegex = new RegExp(search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
       query.$or = [
-        { title: { $regex: search, $options: 'i' } },
-        { originalTitle: { $regex: search, $options: 'i' } }
+        { title: searchRegex },
+        { originalTitle: searchRegex },
+        { overview: searchRegex },
+        { 'genres.name': searchRegex }
       ];
     }
 
@@ -88,12 +131,18 @@ router.get('/', async (req, res) => {
 
     const total = await Movie.countDocuments(query);
 
-    res.json({
+    const response = {
       movies,
       totalPages: Math.ceil(total / limit),
       currentPage: page,
       total
-    });
+    };
+
+    // Cache the response
+    setCachedData(cacheKey, response);
+    console.log('💾 Cached response for:', cacheKey);
+
+    res.json(response);
   } catch (error) {
     console.error('Error fetching movies:', error);
     res.status(500).json({ message: 'Error fetching movies' });
@@ -297,7 +346,7 @@ router.get('/search/:query', async (req, res) => {
 router.post('/:id/watchlist', auth, async (req, res) => {
   try {
     const { id } = req.params;
-    const { status = 'want_to_watch' } = req.body;
+    const { status = 'plan_to_watch' } = req.body;
 
     const existingItem = await Watchlist.findOne({
       user: req.user.id,
@@ -311,6 +360,7 @@ router.post('/:id/watchlist', auth, async (req, res) => {
     const watchlistItem = new Watchlist({
       user: req.user.id,
       movie: id,
+      type: 'movie',
       status
     });
 
@@ -320,6 +370,12 @@ router.post('/:id/watchlist', auth, async (req, res) => {
     res.json(watchlistItem);
   } catch (error) {
     console.error('Error adding to watchlist:', error);
+    
+    // Handle duplicate key error (movie already in watchlist)
+    if (error.code === 11000) {
+      return res.status(400).json({ message: 'Movie already in watchlist' });
+    }
+    
     res.status(500).json({ message: 'Error adding to watchlist' });
   }
 });

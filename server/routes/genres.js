@@ -1,6 +1,38 @@
 const express = require('express');
 const router = express.Router();
 const Genre = require('../models/Genre');
+const TvShow = require('../models/TvShow');
+
+// Get genres with TV show counts
+router.get('/with-counts', async (req, res) => {
+  try {
+    const allGenres = await Genre.find().lean();
+    
+    // Count TV shows for each genre
+    const genresWithCounts = await Promise.all(
+      allGenres.map(async (genre) => {
+        const count = await TvShow.countDocuments({ 
+          genres: genre._id, 
+          isAvailable: true 
+        });
+        return {
+          ...genre,
+          tvShowCount: count
+        };
+      })
+    );
+    
+    // Filter out genres with 0 shows and sort by count descending
+    const genresWithShows = genresWithCounts
+      .filter(genre => genre.tvShowCount > 0)
+      .sort((a, b) => b.tvShowCount - a.tvShowCount);
+    
+    res.json(genresWithShows);
+  } catch (error) {
+    console.error('Error fetching genres with counts:', error);
+    res.status(500).json({ message: 'Error fetching genres with counts' });
+  }
+});
 
 // Get all genres
 router.get('/', async (req, res) => {
