@@ -8,8 +8,11 @@ const watchHistorySchema = new mongoose.Schema({
   },
   movie: {
     type: mongoose.Schema.Types.ObjectId,
-    ref: 'Movie',
-    required: true
+    ref: 'Movie'
+  },
+  tvShow: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'TvShow'
   },
   watchedAt: {
     type: Date,
@@ -26,11 +29,31 @@ const watchHistorySchema = new mongoose.Schema({
   lastPosition: {
     type: Number, // in seconds
     default: 0
+  },
+  season: {
+    type: Number,
+    default: 1
+  },
+  episode: {
+    type: Number,
+    default: 1
   }
+});
+
+// Ensure either movie or tvShow is provided
+watchHistorySchema.pre('validate', function(next) {
+  if (!this.movie && !this.tvShow) {
+    return next(new Error('Either movie or tvShow must be provided'));
+  }
+  if (this.movie && this.tvShow) {
+    return next(new Error('Cannot have both movie and tvShow'));
+  }
+  next();
 });
 
 // Index for efficient queries
 watchHistorySchema.index({ user: 1, watchedAt: -1 });
 watchHistorySchema.index({ user: 1, movie: 1 });
+watchHistorySchema.index({ user: 1, tvShow: 1, season: 1, episode: 1 });
 
 module.exports = mongoose.model('WatchHistory', watchHistorySchema);

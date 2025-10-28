@@ -9,7 +9,6 @@ const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
 // Clear cache on startup
 cache.clear();
-console.log('📦 Cache cleared');
 
 // Cache helper functions
 const getCacheKey = (req) => {
@@ -71,7 +70,6 @@ router.get('/', async (req, res) => {
     const cachedData = getCachedData(cacheKey);
     
     if (cachedData) {
-      console.log('📦 Serving from cache:', cacheKey);
       return res.json(cachedData);
     }
 
@@ -93,7 +91,6 @@ router.get('/', async (req, res) => {
     
     // Add genre filter
     if (genres.length > 0) {
-      console.log('🎭 Filtering by genres:', genres);
       // Find genre by name or ID
       const mongoose = require('mongoose');
       const genreIds = [];
@@ -101,29 +98,21 @@ router.get('/', async (req, res) => {
       for (const genreParam of genres) {
         if (mongoose.Types.ObjectId.isValid(genreParam)) {
           // It's a valid ObjectId
-          console.log(`  ✓ Valid ObjectId: ${genreParam}`);
           genreIds.push(new mongoose.Types.ObjectId(genreParam));
         } else {
           // It's a genre name, find the genre
-          console.log(`  🔍 Looking up genre name: "${genreParam}"`);
           // Case-insensitive search
           const foundGenre = await Genre.findOne({ 
             name: { $regex: new RegExp(`^${genreParam}$`, 'i') }
           });
           if (foundGenre) {
-            console.log(`  ✓ Found genre: ${foundGenre._id}`);
             genreIds.push(foundGenre._id);
-          } else {
-            console.log(`  ✗ Genre not found: "${genreParam}"`);
           }
         }
       }
       
       if (genreIds.length > 0) {
-        console.log(`  ✅ Using ${genreIds.length} genre IDs:`, genreIds);
         query.genres = { $in: genreIds };
-      } else {
-        console.log(`  ⚠️  No valid genres found, skipping genre filter`);
       }
     }
     
@@ -172,7 +161,6 @@ router.get('/', async (req, res) => {
 
     // Cache the response
     setCachedData(cacheKey, response);
-    console.log('💾 Cached response for:', cacheKey);
 
     res.json(response);
   } catch (error) {

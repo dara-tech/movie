@@ -10,6 +10,7 @@ router.get('/', auth, async (req, res) => {
 
     const history = await WatchHistory.find({ user: req.user.id })
       .populate('movie', 'title posterPath releaseDate voteAverage')
+      .populate('tvShow', 'name posterPath firstAirDate voteAverage')
       .sort({ watchedAt: -1 })
       .limit(limit * 1)
       .skip((page - 1) * limit);
@@ -35,6 +36,7 @@ router.get('/recent', auth, async (req, res) => {
 
     const recentMovies = await WatchHistory.find({ user: req.user.id })
       .populate('movie', 'title posterPath releaseDate voteAverage')
+      .populate('tvShow', 'name posterPath firstAirDate voteAverage')
       .sort({ watchedAt: -1 })
       .limit(parseInt(limit));
 
@@ -53,6 +55,7 @@ router.get('/continue', auth, async (req, res) => {
       completed: false
     })
       .populate('movie', 'title posterPath releaseDate voteAverage runtime')
+      .populate('tvShow', 'name posterPath firstAirDate voteAverage')
       .sort({ watchedAt: -1 });
 
     res.json(continueWatching);

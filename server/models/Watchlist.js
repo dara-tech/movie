@@ -52,7 +52,7 @@ const watchlistSchema = new mongoose.Schema({
 });
 
 // Ensure one item per user in watchlist (either movie or tvshow)
-watchlistSchema.index({ user: 1, movie: 1 }, { unique: true, partialFilterExpression: { movie: { $exists: true } } });
-watchlistSchema.index({ user: 1, tvShow: 1 }, { unique: true, partialFilterExpression: { tvShow: { $exists: true } } });
+watchlistSchema.index({ user: 1, movie: 1 }, { unique: true, partialFilterExpression: { movie: { $exists: true, $type: 'objectId' } } });
+watchlistSchema.index({ user: 1, tvShow: 1 }, { unique: true, partialFilterExpression: { tvShow: { $exists: true, $type: 'objectId' } } });
 
 module.exports = mongoose.model('Watchlist', watchlistSchema);
