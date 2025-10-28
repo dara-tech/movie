@@ -93,22 +93,44 @@ io.on('connection', (socket) => {
   });
 });
 
-// Keep-alive ping to prevent server sleep (every 3 minutes)
+// Keep-alive ping to prevent server sleep (every 14 minutes)
 const keepAlive = () => {
   const serverUrl = process.env.SERVER_URL || `http://localhost:${process.env.PORT || 5001}`;
   
+  console.log('🚀 Keep-alive function initialized - pinging every 14 minutes');
+  
   setInterval(async () => {
     try {
-      const response = await fetch(`${serverUrl}/api/health`);
-      if (response.ok) {
-        console.log('🏓 Keep-alive ping successful:', new Date().toISOString());
-      } else {
-        console.log('⚠️ Keep-alive ping failed with status:', response.status);
-      }
+      const https = require('https');
+      const http = require('http');
+      const url = require('url');
+      
+      const parsedUrl = url.parse(`${serverUrl}/api/health`);
+      const client = parsedUrl.protocol === 'https:' ? https : http;
+      
+      const req = client.request({
+        hostname: parsedUrl.hostname,
+        port: parsedUrl.port,
+        path: parsedUrl.path,
+        method: 'GET',
+        timeout: 10000
+      }, (res) => {
+        // Silent success
+      });
+      
+      req.on('error', (error) => {
+        console.log('⚠️ Keep-alive ping error:', error.message);
+      });
+      
+      req.on('timeout', () => {
+        req.destroy();
+      });
+      
+      req.end();
     } catch (error) {
-      console.log('❌ Keep-alive ping error:', error.message);
+      console.log('⚠️ Keep-alive ping exception:', error.message);
     }
-  }, 3 * 60 * 1000); // 3 minutes in milliseconds
+  }, 14 * 60 * 1000); // 14 minutes in milliseconds
 };
 
 const PORT = process.env.PORT || 5001;
@@ -119,7 +141,7 @@ server.listen(PORT, () => {
   
   // Start keep-alive pings only in production
   if (process.env.NODE_ENV === 'production') {
-    console.log('🚀 Starting keep-alive pings every 3 minutes...');
+    console.log('🚀 Starting keep-alive pings every 14 minutes...');
     keepAlive();
   }
 });
