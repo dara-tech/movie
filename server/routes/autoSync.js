@@ -112,18 +112,30 @@ router.post('/sync-now', requireAdmin, async (req, res) => {
       includeUpcoming = false
     } = req.body;
 
-    const result = await autoSyncService.performSync({
+    // Return response immediately to prevent timeout
+    res.json({
+      success: true,
+      message: 'Sync started in background',
+      data: {
+        pages,
+        includeTrending,
+        includePopular,
+        includeTopRated,
+        includeUpcoming
+      }
+    });
+
+    // Run sync in background
+    autoSyncService.performSync({
       pages,
       includeTrending,
       includePopular,
       includeTopRated,
       includeUpcoming
-    });
-
-    res.json({
-      success: result.success,
-      message: result.message,
-      data: result
+    }).then(result => {
+      console.log('✅ Background sync completed:', result);
+    }).catch(error => {
+      console.error('❌ Background sync failed:', error);
     });
   } catch (error) {
     res.status(500).json({

@@ -243,7 +243,28 @@ router.get('/movies', async (req, res) => {
     }
     
     if (genre) {
-      query.genres = genre;
+      // Convert genre string to ObjectId if needed
+      const mongoose = require('mongoose');
+      const genreParams = Array.isArray(genre) ? genre : [genre];
+      const genreIds = [];
+      
+      for (const genreParam of genreParams) {
+        if (mongoose.Types.ObjectId.isValid(genreParam)) {
+          genreIds.push(new mongoose.Types.ObjectId(genreParam));
+        } else {
+          // Case-insensitive search
+          const foundGenre = await Genre.findOne({ 
+            name: { $regex: new RegExp(`^${genreParam}$`, 'i') }
+          });
+          if (foundGenre) {
+            genreIds.push(foundGenre._id);
+          }
+        }
+      }
+      
+      if (genreIds.length > 0) {
+        query.genres = { $in: genreIds };
+      }
     }
     
     if (year && year !== 'all') {
@@ -325,6 +346,148 @@ router.delete('/movies/:id', async (req, res) => {
   } catch (error) {
     console.error('Delete movie error:', error);
     res.status(500).json({ success: false, message: 'Failed to delete movie' });
+  }
+});
+
+// ==================== TV SHOW MANAGEMENT ====================
+
+// Get all TV shows with admin controls
+router.get('/tvshows', async (req, res) => {
+  try {
+    const {
+      page = 1,
+      limit = 20,
+      search,
+      genre,
+      year,
+      status,
+      type,
+      isAvailable,
+      sortBy = 'createdAt',
+      order = 'desc'
+    } = req.query;
+
+    const query = {};
+    
+    if (search) {
+      query.$or = [
+        { name: { $regex: search, $options: 'i' } },
+        { originalName: { $regex: search, $options: 'i' } }
+      ];
+    }
+    
+    if (genre) {
+      // Convert genre string to ObjectId if needed
+      const mongoose = require('mongoose');
+      const genreParams = Array.isArray(genre) ? genre : [genre];
+      const genreIds = [];
+      
+      for (const genreParam of genreParams) {
+        if (mongoose.Types.ObjectId.isValid(genreParam)) {
+          genreIds.push(new mongoose.Types.ObjectId(genreParam));
+        } else {
+          // Case-insensitive search
+          const foundGenre = await Genre.findOne({ 
+            name: { $regex: new RegExp(`^${genreParam}$`, 'i') }
+          });
+          if (foundGenre) {
+            genreIds.push(foundGenre._id);
+          }
+        }
+      }
+      
+      if (genreIds.length > 0) {
+        query.genres = { $in: genreIds };
+      }
+    }
+    
+    if (year && year !== 'all') {
+      const startDate = new Date(`${year}-01-01`);
+      const endDate = new Date(`${year}-12-31`);
+      query.firstAirDate = { $gte: startDate, $lte: endDate };
+    }
+
+    if (status && status !== 'all') {
+      query.status = status;
+    }
+
+    if (type && type !== 'all') {
+      query.type = type;
+    }
+    
+    if (isAvailable !== undefined) {
+      query.isAvailable = isAvailable === 'true';
+    }
+
+    const sortOptions = {};
+    sortOptions[sortBy] = order === 'desc' ? -1 : 1;
+
+    const tvShows = await TvShow.find(query)
+      .populate('genres', 'name')
+      .sort(sortOptions)
+      .limit(limit * 1)
+      .skip((page - 1) * limit);
+
+    const total = await TvShow.countDocuments(query);
+
+    res.json({
+      success: true,
+      data: {
+        tvShows,
+        pagination: {
+          totalPages: Math.ceil(total / limit),
+          currentPage: parseInt(page),
+          total
+        }
+      }
+    });
+  } catch (error) {
+    console.error('Get TV shows error:', error);
+    res.status(500).json({ success: false, message: 'Failed to fetch TV shows' });
+  }
+});
+
+// Update TV show availability
+router.put('/tvshows/:id/availability', async (req, res) => {
+  try {
+    const { isAvailable } = req.body;
+    
+    const tvShow = await TvShow.findByIdAndUpdate(
+      req.params.id,
+      { isAvailable },
+      { new: true }
+    ).populate('genres', 'name');
+
+    if (!tvShow) {
+      return res.status(404).json({ success: false, message: 'TV show not found' });
+    }
+
+    res.json({ success: true, data: tvShow });
+  } catch (error) {
+    console.error('Update TV show availability error:', error);
+    res.status(500).json({ success: false, message: 'Failed to update TV show' });
+  }
+});
+
+// Delete TV show
+router.delete('/tvshows/:id', async (req, res) => {
+  try {
+    const tvShow = await TvShow.findByIdAndDelete(req.params.id);
+    
+    if (!tvShow) {
+      return res.status(404).json({ success: false, message: 'TV show not found' });
+    }
+
+    // Remove from all watchlists (if TV shows are in watchlists)
+    await Watchlist.deleteMany({ tvShow: req.params.id });
+    
+    // Remove from watch history (if TV shows are tracked in history)
+    await WatchHistory.deleteMany({ tvShow: req.params.id });
+
+    res.json({ success: true, message: 'TV show deleted successfully' });
+  } catch (error) {
+    console.error('Delete TV show error:', error);
+    res.status(500).json({ success: false, message: 'Failed to delete TV show' });
   }
 });
 

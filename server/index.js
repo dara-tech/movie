@@ -43,6 +43,15 @@ app.use(cors({
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
+// Health check endpoint for keep-alive
+app.get('/api/health', (req, res) => {
+  res.status(200).json({ 
+    status: 'OK', 
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime()
+  });
+});
+
 // Routes
 app.use('/api/movies', movieRoutes);
 app.use('/api/tvshows', require('./routes/tvshows'));
@@ -84,9 +93,33 @@ io.on('connection', (socket) => {
   });
 });
 
+// Keep-alive ping to prevent server sleep (every 3 minutes)
+const keepAlive = () => {
+  const serverUrl = process.env.SERVER_URL || `http://localhost:${process.env.PORT || 5001}`;
+  
+  setInterval(async () => {
+    try {
+      const response = await fetch(`${serverUrl}/api/health`);
+      if (response.ok) {
+        console.log('🏓 Keep-alive ping successful:', new Date().toISOString());
+      } else {
+        console.log('⚠️ Keep-alive ping failed with status:', response.status);
+      }
+    } catch (error) {
+      console.log('❌ Keep-alive ping error:', error.message);
+    }
+  }, 3 * 60 * 1000); // 3 minutes in milliseconds
+};
+
 const PORT = process.env.PORT || 5001;
 
 server.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
   console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
+  
+  // Start keep-alive pings only in production
+  if (process.env.NODE_ENV === 'production') {
+    console.log('🚀 Starting keep-alive pings every 3 minutes...');
+    keepAlive();
+  }
 });

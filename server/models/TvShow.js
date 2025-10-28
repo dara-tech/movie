@@ -32,7 +32,7 @@ const tvShowSchema = new mongoose.Schema({
   },
   type: {
     type: String,
-    enum: ['Scripted', 'Reality', 'Documentary', 'News', 'Talk Show', 'Miniseries'],
+    enum: ['Scripted', 'Reality', 'Documentary', 'News', 'Talk Show', 'Miniseries', 'Video', 'Animation', 'Anime'],
     default: 'Scripted'
   },
   genres: [{

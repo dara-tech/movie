@@ -2,10 +2,15 @@ const express = require('express');
 const router = express.Router();
 const TvShow = require('../models/TvShow');
 const Genre = require('../models/Genre');
+const tmdbService = require('../services/tmdbService');
 
 // Simple in-memory cache
 const cache = new Map();
 const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
+// Clear cache on startup
+cache.clear();
+console.log('📦 Cache cleared for TV shows');
 
 // Cache helper functions
 const getCacheKey = (req) => {
@@ -54,12 +59,43 @@ router.get('/', async (req, res) => {
     } = req.query;
 
     // Handle multiple genre parameters
-    const genreIds = Array.isArray(genre) ? genre : (genre ? [genre] : []);
+    const genreParams = Array.isArray(genre) ? genre : (genre ? [genre] : []);
 
     const query = { isAvailable: true };
 
-    if (genreIds.length > 0) {
-      query.genres = { $in: genreIds };
+    if (genreParams.length > 0) {
+      console.log('🎭 Filtering TV shows by genres:', genreParams);
+      // Find genre by name or ID
+      const mongoose = require('mongoose');
+      const genreIds = [];
+      
+      for (const genreParam of genreParams) {
+        if (mongoose.Types.ObjectId.isValid(genreParam)) {
+          // It's a valid ObjectId
+          console.log(`  ✓ Valid ObjectId: ${genreParam}`);
+          genreIds.push(new mongoose.Types.ObjectId(genreParam));
+        } else {
+          // It's a genre name, find the genre
+          console.log(`  🔍 Looking up genre name: "${genreParam}"`);
+          // Case-insensitive search
+          const foundGenre = await Genre.findOne({ 
+            name: { $regex: new RegExp(`^${genreParam}$`, 'i') }
+          });
+          if (foundGenre) {
+            console.log(`  ✓ Found genre: ${foundGenre._id}`);
+            genreIds.push(foundGenre._id);
+          } else {
+            console.log(`  ✗ Genre not found: "${genreParam}"`);
+          }
+        }
+      }
+      
+      if (genreIds.length > 0) {
+        console.log(`  ✅ Using ${genreIds.length} genre IDs:`, genreIds);
+        query.genres = { $in: genreIds };
+      } else {
+        console.log(`  ⚠️  No valid genres found, skipping genre filter`);
+      }
     }
 
     if (year && year !== 'all') {
@@ -265,6 +301,56 @@ router.get('/:id', async (req, res) => {
 
     if (!tvShow) {
       return res.status(404).json({ message: 'TV show not found' });
+    }
+
+    // Fix seasons and fetch episode data if needed
+    if (tvShow.seasons && tvShow.seasons.length > 0) {
+      // Fetch season details from TMDB to get real episode counts
+      const seasonsWithEpisodes = await Promise.all(
+        tvShow.seasons.map(async (season, index) => {
+          const seasonNumber = (season.seasonNumber != null && season.seasonNumber !== undefined) 
+            ? season.seasonNumber 
+            : index;
+          
+          let episodeCount = season.episodeCount || 0;
+          
+          // If episodeCount is 0 or undefined, try to fetch from TMDB
+          // For Season 0, try fetching from season 1 if the name suggests it's actually season 1
+          if ((!episodeCount || episodeCount === 0) && tvShow.tmdbId) {
+            let tmdbSeasonToFetch = seasonNumber;
+            
+            // If season is 0 but name is "Season 1", try fetching from season 1
+            if (seasonNumber === 0 && (
+              season.name.toLowerCase().includes('season 1') || 
+              season.name.toLowerCase().includes('season one')
+            )) {
+              tmdbSeasonToFetch = 1;
+            }
+            
+            if (seasonNumber > 0 || tmdbSeasonToFetch === 1) {
+              try {
+                const tmdbSeasonData = await tmdbService.getTvShowEpisodes(tvShow.tmdbId, tmdbSeasonToFetch);
+                episodeCount = tmdbSeasonData.episodes ? tmdbSeasonData.episodes.length : 0;
+              } catch (error) {
+                // Silently fail if TMDB doesn't have the season data
+              }
+            }
+          }
+          
+          return {
+            airDate: season.airDate,
+            episodeCount: episodeCount,
+            id: season.id,
+            name: season.name,
+            overview: season.overview,
+            posterPath: season.posterPath,
+            seasonNumber: seasonNumber,
+            voteAverage: season.voteAverage
+          };
+        })
+      );
+      
+      tvShow.seasons = seasonsWithEpisodes;
     }
 
     res.json(tvShow);

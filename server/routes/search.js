@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const Movie = require('../models/Movie');
+const TvShow = require('../models/TvShow');
 const Genre = require('../models/Genre');
 
 // Get search suggestions
@@ -23,7 +24,19 @@ router.get('/suggestions', async (req, res) => {
       isAvailable: true
     })
     .select('title originalTitle')
-    .limit(5)
+    .limit(3)
+    .lean();
+
+    // Get TV show title suggestions
+    const tvShowSuggestions = await TvShow.find({
+      $or: [
+        { name: searchRegex },
+        { originalName: searchRegex }
+      ],
+      isAvailable: true
+    })
+    .select('name originalName')
+    .limit(3)
     .lean();
 
     // Get genre suggestions
@@ -31,7 +44,7 @@ router.get('/suggestions', async (req, res) => {
       name: searchRegex
     })
     .select('name')
-    .limit(3)
+    .limit(2)
     .lean();
 
     // Format suggestions
@@ -41,9 +54,14 @@ router.get('/suggestions', async (req, res) => {
         text: movie.title,
         value: movie.title
       })),
+      ...tvShowSuggestions.map(tvShow => ({
+        type: 'tvshow',
+        text: tvShow.name,
+        value: tvShow.name
+      })),
       ...genreSuggestions.map(genre => ({
         type: 'genre',
-        text: `${genre.name} movies`,
+        text: `${genre.name}`,
         value: genre.name
       }))
     ];
@@ -68,19 +86,30 @@ router.get('/trending', async (req, res) => {
     const recentMovies = await Movie.find({ isAvailable: true })
       .select('title')
       .sort({ createdAt: -1 })
-      .limit(3)
+      .limit(2)
+      .lean();
+
+    const recentTvShows = await TvShow.find({ isAvailable: true })
+      .select('name')
+      .sort({ createdAt: -1 })
+      .limit(2)
       .lean();
 
     const trending = [
       ...popularGenres.map(genre => ({
         type: 'genre',
-        text: `${genre.name} movies`,
+        text: `${genre.name}`,
         value: genre.name
       })),
       ...recentMovies.map(movie => ({
         type: 'movie',
         text: movie.title,
         value: movie.title
+      })),
+      ...recentTvShows.map(tvShow => ({
+        type: 'tvshow',
+        text: tvShow.name,
+        value: tvShow.name
       }))
     ];
 
@@ -99,6 +128,7 @@ router.get('/', async (req, res) => {
     if (!q || q.trim().length < 1) {
       return res.json({
         movies: [],
+        tvShows: [],
         totalPages: 0,
         currentPage: 1,
         total: 0
@@ -107,10 +137,19 @@ router.get('/', async (req, res) => {
 
     const searchRegex = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
     
-    const query = {
+    const movieQuery = {
       $or: [
         { title: searchRegex },
         { originalTitle: searchRegex },
+        { overview: searchRegex }
+      ],
+      isAvailable: true
+    };
+
+    const tvShowQuery = {
+      $or: [
+        { name: searchRegex },
+        { originalName: searchRegex },
         { overview: searchRegex }
       ],
       isAvailable: true
@@ -121,20 +160,29 @@ router.get('/', async (req, res) => {
 
     const skip = (parseInt(page) - 1) * parseInt(limit);
 
-    const [movies, total] = await Promise.all([
-      Movie.find(query)
+    const [movies, tvShows, movieTotal, tvShowTotal] = await Promise.all([
+      Movie.find(movieQuery)
         .populate('genres', 'name')
         .sort(sortOptions)
         .skip(skip)
         .limit(parseInt(limit))
         .lean(),
-      Movie.countDocuments(query)
+      TvShow.find(tvShowQuery)
+        .populate('genres', 'name')
+        .sort(sortOptions)
+        .skip(skip)
+        .limit(parseInt(limit))
+        .lean(),
+      Movie.countDocuments(movieQuery),
+      TvShow.countDocuments(tvShowQuery)
     ]);
 
+    const total = movieTotal + tvShowTotal;
     const totalPages = Math.ceil(total / parseInt(limit));
 
     res.json({
       movies,
+      tvShows,
       totalPages,
       currentPage: parseInt(page),
       total

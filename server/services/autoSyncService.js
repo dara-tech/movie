@@ -8,6 +8,7 @@ const mongoose = require('mongoose');
 const tmdbService = require('./tmdbService');
 const vidsrcService = require('./vidsrcService');
 const Movie = require('../models/Movie');
+const TvShow = require('../models/TvShow');
 const Genre = require('../models/Genre');
 
 class AutoSyncService {
@@ -18,6 +19,9 @@ class AutoSyncService {
       totalMovies: 0,
       newMovies: 0,
       updatedMovies: 0,
+      totalTvShows: 0,
+      newTvShows: 0,
+      updatedTvShows: 0,
       vidsrcUrls: 0,
       errors: 0
     };
@@ -88,6 +92,9 @@ class AutoSyncService {
       totalMovies: 0,
       newMovies: 0,
       updatedMovies: 0,
+      totalTvShows: 0,
+      newTvShows: 0,
+      updatedTvShows: 0,
       vidsrcUrls: 0,
       errors: 0
     };
@@ -109,15 +116,19 @@ class AutoSyncService {
 
       if (options.includePopular) {
         syncPromises.push(this.syncMoviesByType('popular', options.pages || 5));
+        syncPromises.push(this.syncTvShowsByType('popular', options.pages || 5));
       }
       if (options.includeTrending) {
         syncPromises.push(this.syncMoviesByType('trending', options.pages || 3));
+        syncPromises.push(this.syncTvShowsByType('trending', options.pages || 3));
       }
       if (options.includeTopRated) {
         syncPromises.push(this.syncMoviesByType('top_rated', options.pages || 3));
+        syncPromises.push(this.syncTvShowsByType('top_rated', options.pages || 3));
       }
       if (options.includeUpcoming) {
         syncPromises.push(this.syncMoviesByType('upcoming', options.pages || 2));
+        syncPromises.push(this.syncTvShowsByType('on_the_air', options.pages || 2));
       }
 
       // Run all sync operations in parallel
@@ -287,6 +298,141 @@ class AutoSyncService {
 
     } catch (error) {
       console.error(`❌ Error syncing ${movieData.title}:`, error.message);
+      this.syncStats.errors++;
+    }
+  }
+
+  /**
+   * Sync TV shows by type (popular, trending, etc.)
+   */
+  async syncTvShowsByType(type, pages) {
+    console.log(`📺 Syncing ${type} TV shows (${pages} pages)...`);
+    
+    for (let page = 1; page <= pages; page++) {
+      try {
+        let tvShowsResponse;
+        
+        switch (type) {
+          case 'popular':
+            tvShowsResponse = await tmdbService.getPopularTvShows(page);
+            break;
+          case 'trending':
+            tvShowsResponse = await tmdbService.getTrendingTvShows(page);
+            break;
+          case 'top_rated':
+            tvShowsResponse = await tmdbService.getTopRatedTvShows(page);
+            break;
+          case 'on_the_air':
+            tvShowsResponse = await tmdbService.getOnTheAirTvShows(page);
+            break;
+          default:
+            throw new Error(`Unknown TV show type: ${type}`);
+        }
+
+        const tvShows = tvShowsResponse.results;
+        console.log(`📥 Processing page ${page}/${pages} (${tvShows.length} TV shows)`);
+
+        for (const tvShowData of tvShows) {
+          await this.syncTvShow(tvShowData);
+        }
+
+        // Rate limiting delay
+        await new Promise(resolve => setTimeout(resolve, 1000));
+
+      } catch (error) {
+        console.error(`❌ Error syncing ${type} page ${page}:`, error.message);
+        this.syncStats.errors++;
+      }
+    }
+  }
+
+  /**
+   * Sync individual TV show
+   */
+  async syncTvShow(tvShowData) {
+    try {
+      // Check if TV show already exists
+      const existingTvShow = await TvShow.findOne({ tmdbId: tvShowData.id });
+      
+      // Get detailed TV show info including external IDs
+      const tvShowDetails = await tmdbService.getTvShowDetails(tvShowData.id);
+      
+      // Generate Vidsrc URL
+      let vidsrcUrl = null;
+      if (tvShowDetails.external_ids?.imdb_id || tvShowData.id) {
+        try {
+          vidsrcUrl = vidsrcService.generateTvShowStreamingUrl({
+            tmdbId: tvShowData.id,
+            imdbId: tvShowDetails.external_ids?.imdb_id
+          });
+          this.syncStats.vidsrcUrls++;
+        } catch (error) {
+          console.warn(`⚠️  Could not generate Vidsrc URL for ${tvShowData.name}`);
+        }
+      }
+
+      // Find genre IDs for this TV show
+      const genreIds = [];
+      if (tvShowData.genre_ids) {
+        for (const genreId of tvShowData.genre_ids) {
+          const genreDoc = await Genre.findOne({ tmdbId: genreId });
+          if (genreDoc) {
+            genreIds.push(genreDoc._id);
+          }
+        }
+      }
+
+      const tvShow = {
+        tmdbId: tvShowData.id,
+        name: tvShowData.name,
+        originalName: tvShowData.original_name,
+        overview: tvShowData.overview,
+        firstAirDate: tvShowData.first_air_date ? new Date(tvShowData.first_air_date) : null,
+        posterPath: tvShowData.poster_path,
+        backdropPath: tvShowData.backdrop_path,
+        voteAverage: tvShowData.vote_average,
+        voteCount: tvShowData.vote_count,
+        popularity: tvShowData.popularity,
+        originalLanguage: tvShowData.original_language,
+        originCountry: tvShowData.origin_country || [],
+        genres: genreIds,
+        vidsrcUrl: vidsrcUrl,
+        streamingUrl: vidsrcUrl,
+        isAvailable: true,
+        status: tvShowDetails.status || 'Returning Series',
+        type: tvShowDetails.type || 'Scripted',
+        numberOfSeasons: tvShowDetails.number_of_seasons || 1,
+        numberOfEpisodes: tvShowDetails.number_of_episodes || 0,
+        seasons: tvShowDetails.seasons || [],
+        networks: tvShowDetails.networks || [],
+        productionCompanies: tvShowDetails.production_companies || [],
+        createdBy: tvShowDetails.created_by || [],
+        episodeRunTime: tvShowDetails.episode_run_time || [],
+        averageRuntime: tvShowDetails.episode_run_time && tvShowDetails.episode_run_time.length > 0 
+          ? tvShowDetails.episode_run_time.reduce((a, b) => a + b, 0) / tvShowDetails.episode_run_time.length 
+          : null,
+        imdbId: tvShowDetails.external_ids?.imdb_id,
+        externalIds: tvShowDetails.external_ids || {},
+        lastUpdated: new Date()
+      };
+
+      const result = await TvShow.findOneAndUpdate(
+        { tmdbId: tvShowData.id },
+        tvShow,
+        { upsert: true, new: true }
+      );
+
+      this.syncStats.totalTvShows++;
+      if (existingTvShow) {
+        this.syncStats.updatedTvShows++;
+      } else {
+        this.syncStats.newTvShows++;
+      }
+
+      console.log(`✅ ${tvShowData.name} ${vidsrcUrl ? '(with Vidsrc)' : '(no Vidsrc)'}`);
+
+    } catch (error) {
+      console.error(`❌ Error syncing ${tvShowData.name}:`, error.message);
       this.syncStats.errors++;
     }
   }
