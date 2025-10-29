@@ -17,6 +17,8 @@ const syncRoutes = require('./routes/sync');
 const vidsrcRoutes = require('./routes/vidsrc');
 const autoSyncRoutes = require('./routes/autoSync');
 const adminRoutes = require('./routes/admin');
+const streamingRoutes = require('./routes/streaming');
+const syncManagementRoutes = require('./routes/syncManagement');
 
 // Connect to database
 connectDB();
@@ -63,6 +65,8 @@ app.use('/api/sync', syncRoutes);
 app.use('/api/vidsrc', vidsrcRoutes);
 app.use('/api/auto-sync', autoSyncRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/admin/streaming', streamingRoutes);
+app.use('/api/admin/sync', syncManagementRoutes);
 app.use('/api/search', require('./routes/search'));
 
 // Serve static files from React build

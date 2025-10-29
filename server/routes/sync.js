@@ -113,30 +113,77 @@ router.post('/tvshows/bulk', async (req, res) => {
 router.post('/vidsrc-urls', async (req, res) => {
   try {
     const movies = await Movie.find({ 
-      $or: [
-        { vidsrcUrl: { $exists: false } },
-        { vidsrcUrl: null }
-      ],
-      $or: [
-        { tmdbId: { $exists: true } },
-        { imdbId: { $exists: true } }
+      $and: [
+        {
+          $or: [
+            { vidsrcUrl: { $exists: false } },
+            { vidsrcUrl: null },
+            { vidsrcUrl: '' }
+          ]
+        },
+        {
+          $or: [
+            { tmdbId: { $exists: true, $ne: null } },
+            { imdbId: { $exists: true, $ne: null } }
+          ]
+        }
       ]
     });
 
     let updatedCount = 0;
     let errorCount = 0;
+    let skippedCount = 0;
+
+    console.log(`Found ${movies.length} movies without vidsrc URLs`);
 
     for (const movie of movies) {
       try {
-        const vidsrcUrl = vidsrcService.generateMovieStreamingUrl({
-          tmdbId: movie.tmdbId,
-          imdbId: movie.imdbId
-        });
-
-        if (vidsrcUrl) {
-          await Movie.findByIdAndUpdate(movie._id, { vidsrcUrl });
-          updatedCount++;
+        // If movie doesn't have imdbId but has tmdbId, try to fetch it
+        let imdbId = movie.imdbId;
+        if (!imdbId && movie.tmdbId) {
+          try {
+            const movieDetails = await tmdbService.getMovieDetails(movie.tmdbId);
+            if (movieDetails?.external_ids?.imdb_id) {
+              imdbId = movieDetails.external_ids.imdb_id;
+              // Update movie with IMDB ID for future use
+              await Movie.findByIdAndUpdate(movie._id, { 
+                imdbId,
+                updatedAt: new Date()
+              });
+            }
+          } catch (error) {
+            console.warn(`Could not fetch IMDB ID for movie ${movie.title}:`, error.message);
+          }
         }
+
+        // Generate vidsrc URL if we have at least tmdbId or imdbId
+        if (movie.tmdbId || imdbId) {
+          const vidsrcUrl = vidsrcService.generateMovieStreamingUrl({
+            tmdbId: movie.tmdbId,
+            imdbId: imdbId
+          });
+
+          if (vidsrcUrl) {
+            await Movie.findByIdAndUpdate(movie._id, { 
+              vidsrcUrl,
+              imdbId: imdbId || movie.imdbId, // Update IMDB ID if we fetched it
+              updatedAt: new Date()
+            });
+            updatedCount++;
+            
+            if (updatedCount % 50 === 0) {
+              console.log(`Progress: ${updatedCount} movies updated...`);
+            }
+          } else {
+            skippedCount++;
+          }
+        } else {
+          skippedCount++;
+          console.warn(`Skipping movie ${movie.title}: No tmdbId or imdbId`);
+        }
+
+        // Rate limiting to avoid overwhelming TMDB API
+        await new Promise(resolve => setTimeout(resolve, 200));
       } catch (error) {
         console.warn(`Could not generate Vidsrc URL for movie ${movie.title}:`, error.message);
         errorCount++;
@@ -144,8 +191,9 @@ router.post('/vidsrc-urls', async (req, res) => {
     }
 
     res.json({ 
-      message: `Vidsrc URLs generated successfully`,
+      message: `Vidsrc URLs generation completed`,
       updated: updatedCount,
+      skipped: skippedCount,
       errors: errorCount,
       total: movies.length
     });

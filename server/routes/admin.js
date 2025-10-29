@@ -491,6 +491,41 @@ router.delete('/tvshows/:id', async (req, res) => {
   }
 });
 
+// ==================== GENRE MANAGEMENT ====================
+
+// Delete genre
+router.delete('/genres/:id', async (req, res) => {
+  try {
+    const Genre = require('../models/Genre');
+    const TvShow = require('../models/TvShow');
+    const Movie = require('../models/Movie');
+    
+    const genre = await Genre.findById(req.params.id);
+    
+    if (!genre) {
+      return res.status(404).json({ success: false, message: 'Genre not found' });
+    }
+
+    // Check if genre is used by any TV shows or movies
+    const tvShowCount = await TvShow.countDocuments({ genres: req.params.id });
+    const movieCount = await Movie.countDocuments({ genres: req.params.id });
+    
+    if (tvShowCount > 0 || movieCount > 0) {
+      return res.status(400).json({ 
+        success: false, 
+        message: `Cannot delete genre. It is used by ${tvShowCount} TV show(s) and ${movieCount} movie(s).` 
+      });
+    }
+
+    await Genre.findByIdAndDelete(req.params.id);
+
+    res.json({ success: true, message: 'Genre deleted successfully' });
+  } catch (error) {
+    console.error('Delete genre error:', error);
+    res.status(500).json({ success: false, message: 'Failed to delete genre' });
+  }
+});
+
 // ==================== SYSTEM MANAGEMENT ====================
 
 // Get system health
