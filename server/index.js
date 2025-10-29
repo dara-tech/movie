@@ -93,44 +93,17 @@ io.on('connection', (socket) => {
   });
 });
 
-// Keep-alive ping to prevent server sleep (every 14 minutes)
-const keepAlive = () => {
-  const serverUrl = process.env.SERVER_URL || `http://localhost:${process.env.PORT || 5001}`;
+// Auto-reload function to prevent server sleep
+const autoReload = () => {
+  const https = require('https');
   
-  console.log('🚀 Keep-alive function initialized - pinging every 14 minutes');
-  
-  setInterval(async () => {
-    try {
-      const https = require('https');
-      const http = require('http');
-      const url = require('url');
-      
-      const parsedUrl = url.parse(`${serverUrl}/api/health`);
-      const client = parsedUrl.protocol === 'https:' ? https : http;
-      
-      const req = client.request({
-        hostname: parsedUrl.hostname,
-        port: parsedUrl.port,
-        path: parsedUrl.path,
-        method: 'GET',
-        timeout: 10000
-      }, (res) => {
-        // Silent success
-      });
-      
-      req.on('error', (error) => {
-        console.log('⚠️ Keep-alive ping error:', error.message);
-      });
-      
-      req.on('timeout', () => {
-        req.destroy();
-      });
-      
-      req.end();
-    } catch (error) {
-      console.log('⚠️ Keep-alive ping exception:', error.message);
-    }
-  }, 14 * 60 * 1000); // 14 minutes in milliseconds
+  https.get("https://movie-7zq4.onrender.com", (res) => {
+    // Auto-reload request sent
+  }).on("error", (err) => {
+    // Auto-reload failed
+  }).on("timeout", () => {
+    // Auto-reload request timed out
+  }).setTimeout(10000);
 };
 
 const PORT = process.env.PORT || 5001;
@@ -139,9 +112,7 @@ server.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
   console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
   
-  // Start keep-alive pings only in production
-  if (process.env.NODE_ENV === 'production') {
-    console.log('🚀 Starting keep-alive pings every 14 minutes...');
-    keepAlive();
-  }
+  // Start auto-reload pings (enabled for testing)
+  console.log('🚀 Starting auto-reload pings every 30 seconds...');
+  setInterval(autoReload, 14 * 60 * 1000); // 14 minutes
 });
