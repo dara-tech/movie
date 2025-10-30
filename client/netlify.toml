@@ -12,11 +12,12 @@
 
 # Redirect movie routes to Next.js (if Next.js is deployed separately)
 # For now, redirect all routes to index.html (React app)
-[[redirects]]
-  from = "/movie/:id"
-  to = "https://streammoviestream.netlify.app/movie/:id"
-  status = 200
-  force = true
+# Movie pages handled by React app (not Next.js)
+# [[redirects]]
+#   from = "/movie/:id"
+#   to = "https://streammoviestream.netlify.app/movie/:id"
+#   status = 200
+#   force = true
 
 # Handle client-side routing - redirect all other routes to index.html
 [[redirects]]

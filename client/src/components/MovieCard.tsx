@@ -55,12 +55,8 @@ const MovieCard: React.FC<MovieCardProps> = ({
   const handleDetailClick = (e: React.MouseEvent) => {
     e.stopPropagation();
     if (isUpcoming()) return; // Don't allow detail view for upcoming movies
-    // Navigate to Next.js for perfect OG tags
-    const nextjsUrl = process.env.REACT_APP_NEXTJS_URL || 
-      (process.env.NODE_ENV === 'production' 
-        ? 'https://streammoviestream.netlify.app' 
-        : 'http://localhost:3001');
-    window.location.href = `${nextjsUrl}/movie/${movie._id}`;
+    // Navigate to movie detail page within React app
+    navigate(`/movie/${movie._id}`);
   };
 
   const handleAddToWatchlistClick = async (e: React.MouseEvent) => {
