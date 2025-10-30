@@ -58,7 +58,7 @@ const MovieCard: React.FC<MovieCardProps> = ({
     // Navigate to Next.js for perfect OG tags
     const nextjsUrl = process.env.REACT_APP_NEXTJS_URL || 
       (process.env.NODE_ENV === 'production' 
-        ? 'https://your-nextjs-app.netlify.app' 
+        ? 'https://pagerender.netlify.app' 
         : 'http://localhost:3001');
     window.location.href = `${nextjsUrl}/movie/${movie._id}`;
   };
