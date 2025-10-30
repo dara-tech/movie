@@ -5,10 +5,11 @@
 [build.environment]
   NODE_VERSION = "18"
 
-# Enable SPA prerendering for better SEO
-[[prerendering]]
-  crawl = true
-  include = ["/", "/movies", "/tvshows", "/movie/*", "/tvshow/*"]
+# Prerendering disabled - using client-side react-helmet-async for meta tags
+# Note: Client-side meta tags won't work for social crawlers (use Next.js for that)
+# [[prerendering]]
+#   crawl = true
+#   include = ["/", "/movies", "/tvshows", "/movie/*", "/tvshow/*"]
 
 # Redirect movie routes to Next.js (if Next.js is deployed separately)
 # For now, redirect all routes to index.html (React app)
