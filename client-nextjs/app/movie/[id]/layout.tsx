@@ -12,7 +12,7 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL
     
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL 
   || (process.env.NODE_ENV === 'production'
-    ? 'https://pagerender.netlify.app'
+    ? 'https://streammoviehdfree.netlify.app'
     : 'http://localhost:3001');
 
 interface Movie {

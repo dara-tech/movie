@@ -10,7 +10,7 @@ import streamingService, { StreamingOption } from '../../../services/streamingSe
 const API_URL = typeof window !== 'undefined' 
   ? (process.env.NEXT_PUBLIC_API_URL || 'https://movie-7zq4.onrender.com')
   : 'https://movie-7zq4.onrender.com';
-const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || 'https://pagerender.netlify.app';
+const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || 'https://streammoviehdfree.netlify.app';
 
 interface Movie {
   _id: string;
