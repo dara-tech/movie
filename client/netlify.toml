@@ -1,6 +1,6 @@
 [build]
   publish = "build"
-  command = "npm run build"
+  command = "npm install --legacy-peer-deps && npm run build"
 
 [build.environment]
   NODE_VERSION = "18"
@@ -14,7 +14,7 @@
 # For now, redirect all routes to index.html (React app)
 [[redirects]]
   from = "/movie/:id"
-  to = "https://your-nextjs-app.netlify.app/movie/:id"
+  to = "https://streammoviestream.netlify.app/movie/:id"
   status = 200
   force = true
 
