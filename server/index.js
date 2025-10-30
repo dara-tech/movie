@@ -36,9 +36,10 @@ const io = socketIo(server, {
 app.use(cors({
   origin: [
     process.env.CLIENT_URL || "http://localhost:3000",
+    "http://localhost:3001", // Next.js app - development
     "https://darling-druid-4e85af.netlify.app",
     "https://visionary-lebkuchen-a7e181.netlify.app",
-    "https://*.netlify.app"
+    "https://*.netlify.app" // Allow all Netlify subdomains (covers Next.js deployment)
   ],
   credentials: true
 }));
