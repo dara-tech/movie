@@ -6,10 +6,11 @@ import { Metadata } from 'next';
 import MoviePlayer from '../../../components/MoviePlayer';
 import streamingService, { StreamingOption } from '../../../services/streamingService';
 
+// Use environment variables, with fallback for production
 const API_URL = typeof window !== 'undefined' 
-  ? (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5001')
-  : 'http://localhost:5001';
-const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || 'https://visionary-lebkuchen-a7e181.netlify.app';
+  ? (process.env.NEXT_PUBLIC_API_URL || 'https://movie-7zq4.onrender.com')
+  : 'https://movie-7zq4.onrender.com';
+const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || 'https://pagerender.netlify.app';
 
 interface Movie {
   _id: string;

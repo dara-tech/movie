@@ -1,7 +1,16 @@
 import { Metadata } from 'next';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'https://movie-7zq4.onrender.com';
-const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || 'https://pagerender.netlify.app';
+// Use environment variables for API URL
+// Default to production API for SSR metadata generation
+const API_URL = process.env.NEXT_PUBLIC_API_URL 
+  || (process.env.NODE_ENV === 'production' 
+    ? 'https://movie-7zq4.onrender.com' 
+    : 'http://localhost:5001');
+    
+const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL 
+  || (process.env.NODE_ENV === 'production'
+    ? 'https://pagerender.netlify.app'
+    : 'http://localhost:3001');
 
 interface Movie {
   _id: string;
