@@ -42,7 +42,7 @@ app.use(cors({
       process.env.CLIENT_URL || "http://localhost:3000",
       "http://localhost:3001", // Next.js app - development
       "https://visionary-lebkuchen-a7e181.netlify.app",
-      "streammoviestream.netlify.app", // Next.js app production
+      "https://streammoviestream.netlify.app", // Next.js app production
       /^https:\/\/.*\.netlify\.app$/ // Allow all Netlify subdomains
     ];
     
