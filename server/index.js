@@ -34,13 +34,33 @@ const io = socketIo(server, {
 
 // Middleware
 app.use(cors({
-  origin: [
-    process.env.CLIENT_URL || "http://localhost:3000",
-    "http://localhost:3001", // Next.js app - development
-    "https://darling-druid-4e85af.netlify.app",
-    "https://visionary-lebkuchen-a7e181.netlify.app",
-    "https://*.netlify.app" // Allow all Netlify subdomains (covers Next.js deployment)
-  ],
+  origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) return callback(null, true);
+    
+    const allowedOrigins = [
+      process.env.CLIENT_URL || "http://localhost:3000",
+      "http://localhost:3001", // Next.js app - development
+      "https://darling-druid-4e85af.netlify.app",
+      "https://visionary-lebkuchen-a7e181.netlify.app",
+      "https://pagerender.netlify.app", // Next.js app production
+      /^https:\/\/.*\.netlify\.app$/ // Allow all Netlify subdomains
+    ];
+    
+    // Check if origin is allowed
+    const isAllowed = allowedOrigins.some(allowedOrigin => {
+      if (allowedOrigin instanceof RegExp) {
+        return allowedOrigin.test(origin);
+      }
+      return allowedOrigin === origin;
+    });
+    
+    if (isAllowed) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
   credentials: true
 }));
 app.use(express.json({ limit: '10mb' }));
