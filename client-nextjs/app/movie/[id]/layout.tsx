@@ -1,5 +1,8 @@
 import { Metadata } from 'next';
 
+// Force dynamic rendering for this route to enable SSR
+export const dynamic = 'force-dynamic';
+
 // Use environment variables for API URL
 // Default to production API for SSR metadata generation
 const API_URL = process.env.NEXT_PUBLIC_API_URL 
@@ -53,8 +56,9 @@ async function fetchMovie(id: string): Promise<Movie | null> {
   }
 }
 
-export async function generateMetadata({ params }: { params: { id: string } }): Promise<Metadata> {
-  const movie = await fetchMovie(params.id);
+export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
+  const { id } = await params;
+  const movie = await fetchMovie(id);
 
   if (!movie) {
     return {
