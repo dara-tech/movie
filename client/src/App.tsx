@@ -9,6 +9,7 @@ import Register from './components/Register';
 import Dashboard from './components/Dashboard';
 import LandingPage from './components/LandingPage';
 import MovieDetailPage from './components/MovieDetailPage';
+import CastDetailPage from './components/CastDetailPage';
 import WatchlistPage from './components/WatchlistPage';
 import HistoryPage from './components/HistoryPage';
 import AdminLayout from './components/AdminLayout';
@@ -84,6 +85,14 @@ const AppContent: React.FC = () => {
             element={
               <ProtectedRoute>
                 <MovieDetailPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/cast/:id"
+            element={
+              <ProtectedRoute>
+                <CastDetailPage />
               </ProtectedRoute>
             }
           />

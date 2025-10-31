@@ -130,6 +130,23 @@ const tvShowSchema = new mongoose.Schema({
     twitterId: String
   },
   keywords: [String],
+  watchProviders: {
+    flatrate: [{
+      providerId: Number,
+      providerName: String,
+      logoPath: String
+    }],
+    buy: [{
+      providerId: Number,
+      providerName: String,
+      logoPath: String
+    }],
+    rent: [{
+      providerId: Number,
+      providerName: String,
+      logoPath: String
+    }]
+  },
   lastUpdated: {
     type: Date,
     default: Date.now

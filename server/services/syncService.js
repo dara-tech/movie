@@ -9,6 +9,24 @@ class SyncService {
     this.tmdbApiKey = process.env.TMDB_API_KEY;
     this.tmdbBaseUrl = 'https://api.themoviedb.org/3';
     this.runningJobs = new Map();
+    this.stopFlags = new Map(); // Track jobs to stop
+  }
+
+  // Resolve TMDB genre ids to Genre ObjectIds
+  async resolveGenreObjectIds(tmdbGenres) {
+    if (!Array.isArray(tmdbGenres)) return [];
+    const tmdbIds = tmdbGenres
+      .map(g => (typeof g === 'number' ? g : g?.id))
+      .filter(id => typeof id === 'number');
+
+    if (tmdbIds.length === 0) return [];
+
+    const genres = await Genre.find({ tmdbId: { $in: tmdbIds } }, { _id: 1, tmdbId: 1 });
+    const tmdbIdToObjectId = new Map(genres.map(g => [g.tmdbId, g._id]));
+
+    return tmdbIds
+      .map(id => tmdbIdToObjectId.get(id))
+      .filter(Boolean);
   }
 
   // Initialize default sync jobs
@@ -79,7 +97,44 @@ class SyncService {
   }
 
   // Update job progress
-  async updateJobProgress(jobId, progress, status = null, itemsProcessed = null, totalItems = null) {
+  async addLog(jobId, message, level = 'info') {
+    try {
+      // Ensure jobId is a string (MongoDB ObjectId)
+      const jobIdStr = jobId && jobId.toString ? jobId.toString() : String(jobId);
+      
+      const logEntry = {
+        timestamp: new Date(),
+        level: level,
+        message: message
+      };
+      
+      // Simple $push to add log entry
+      const result = await SyncJob.findByIdAndUpdate(jobIdStr, {
+        $push: {
+          logs: logEntry
+        }
+      }, { new: true });
+      
+      // Keep only last 100 logs
+      if (result && result.logs && result.logs.length > 100) {
+        await SyncJob.findByIdAndUpdate(jobIdStr, {
+          $set: {
+            logs: result.logs.slice(-100) // Keep last 100 logs
+          }
+        });
+      }
+      
+      // Also log to console for debugging
+      console.log(`[Sync Job ${jobIdStr}] [${level.toUpperCase()}] ${message}`);
+      
+    } catch (error) {
+      console.error('Error adding log:', error);
+      console.error('JobId:', jobId, 'Type:', typeof jobId);
+      // Don't throw - logging shouldn't break sync
+    }
+  }
+
+  async updateJobProgress(jobId, progress, status = null, itemsProcessed = null, totalItems = null, logMessage = null) {
     const updateData = { progress };
     
     if (status) updateData.status = status;
@@ -87,6 +142,10 @@ class SyncService {
     if (totalItems !== null) updateData.totalItems = totalItems;
     
     await SyncJob.findByIdAndUpdate(jobId, updateData);
+    
+    if (logMessage) {
+      await this.addLog(jobId, logMessage, 'info');
+    }
   }
 
   // Mark job as completed
@@ -100,9 +159,11 @@ class SyncService {
 
     if (success) {
       updateData.$inc = { successCount: 1 };
+      await this.addLog(jobId, 'Job completed successfully', 'success');
     } else {
       updateData.$inc = { failureCount: 1 };
       updateData.lastError = new Date();
+      await this.addLog(jobId, `Job failed: ${errorMessage || 'Unknown error'}`, 'error');
     }
 
     await SyncJob.findByIdAndUpdate(jobId, updateData);
@@ -114,6 +175,7 @@ class SyncService {
       const job = await SyncJob.findById(jobId);
       if (!job) throw new Error('Job not found');
 
+      await this.addLog(jobId, 'Starting movie sync job', 'info');
       await this.updateJobProgress(jobId, 0, 'running', 0, 0);
 
       let totalMovies = 0;
@@ -130,10 +192,20 @@ class SyncService {
       });
 
       totalMovies = firstPageResponse.data.total_results;
+      await this.addLog(jobId, `Found ${totalMovies} total movies to sync`, 'info');
       await this.updateJobProgress(jobId, 0, 'running', 0, totalMovies);
 
       // Process each page
       for (let page = 1; page <= Math.min(pageLimit, firstPageResponse.data.total_pages); page++) {
+        // Check if job should stop
+        if (this.shouldStop(jobId)) {
+          await this.addLog(jobId, 'Sync job stopped by user', 'warning');
+          await this.updateJobProgress(jobId, (processedMovies / totalMovies * 100), 'paused', processedMovies, totalMovies);
+          break;
+        }
+
+        await this.addLog(jobId, `Processing page ${page}/${Math.min(pageLimit, firstPageResponse.data.total_pages)}`, 'info');
+        
         const response = await axios.get(`${this.tmdbBaseUrl}/movie/popular`, {
           params: {
             api_key: this.tmdbApiKey,
@@ -145,49 +217,110 @@ class SyncService {
         const movies = response.data.results;
         
         for (const movieData of movies) {
+          // Check if job should stop
+          if (this.shouldStop(jobId)) {
+            await this.addLog(jobId, 'Sync job stopped by user', 'warning');
+            await this.updateJobProgress(jobId, (processedMovies / totalMovies * 100), 'paused', processedMovies, totalMovies);
+            break;
+          }
           try {
             // Check if movie already exists
             const existingMovie = await Movie.findOne({ tmdbId: movieData.id });
             
-            if (!existingMovie) {
-              // Get detailed movie info
-              const detailResponse = await axios.get(`${this.tmdbBaseUrl}/movie/${movieData.id}`, {
-                params: { api_key: this.tmdbApiKey }
-              });
+            // Get detailed movie info to fetch watch providers
+            const detailResponse = await axios.get(`${this.tmdbBaseUrl}/movie/${movieData.id}`, {
+              params: { 
+                api_key: this.tmdbApiKey,
+                append_to_response: 'watch/providers'
+              }
+            });
 
-              const movieDetail = detailResponse.data;
-              
+            const movieDetail = detailResponse.data;
+            
+            // Get watch providers (US region as default)
+            let watchProviders = { flatrate: [], buy: [], rent: [] };
+            if (movieDetail['watch/providers'] && movieDetail['watch/providers'].results && movieDetail['watch/providers'].results.US) {
+              const usProviders = movieDetail['watch/providers'].results.US;
+              watchProviders.flatrate = (usProviders.flatrate || []).map(p => ({
+                providerId: p.provider_id,
+                providerName: p.provider_name,
+                logoPath: p.logo_path
+              }));
+              watchProviders.buy = (usProviders.buy || []).map(p => ({
+                providerId: p.provider_id,
+                providerName: p.provider_name,
+                logoPath: p.logo_path
+              }));
+              watchProviders.rent = (usProviders.rent || []).map(p => ({
+                providerId: p.provider_id,
+                providerName: p.provider_name,
+                logoPath: p.logo_path
+              }));
+            }
+            
+            if (!existingMovie) {
+              // Resolve genre ObjectIds
+              const genreObjectIds = await this.resolveGenreObjectIds(movieDetail.genres);
+
               // Create new movie
               const newMovie = new Movie({
                 tmdbId: movieDetail.id,
                 title: movieDetail.title,
-                overview: movieDetail.overview,
-                releaseDate: movieDetail.release_date,
+                overview: movieDetail.overview || 'No overview available',
+                releaseDate: movieDetail.release_date ? new Date(movieDetail.release_date) : new Date(),
                 posterPath: movieDetail.poster_path,
                 backdropPath: movieDetail.backdrop_path,
-                voteAverage: movieDetail.vote_average,
-                voteCount: movieDetail.vote_count,
-                popularity: movieDetail.popularity,
-                genres: movieDetail.genres.map(g => g.id),
-                adult: movieDetail.adult,
-                originalLanguage: movieDetail.original_language,
-                originalTitle: movieDetail.original_title,
+                voteAverage: movieDetail.vote_average || 0,
+                voteCount: movieDetail.vote_count || 0,
+                popularity: movieDetail.popularity || 0,
+                genres: genreObjectIds,
+                adult: movieDetail.adult || false,
+                originalLanguage: movieDetail.original_language || 'en',
+                originalTitle: movieDetail.original_title || movieDetail.title,
                 runtime: movieDetail.runtime,
                 status: movieDetail.status,
                 tagline: movieDetail.tagline,
                 budget: movieDetail.budget,
-                revenue: movieDetail.revenue
+                revenue: movieDetail.revenue,
+                watchProviders: watchProviders
               });
 
               await newMovie.save();
+              await this.addLog(jobId, `Created: ${movieDetail.title} (${movieDetail.id})`, 'success');
+            } else {
+              // Update existing movie - SAFE: Only updates watchProviders field, no data loss
+              // Only update if watchProviders is empty or missing (prevent overwriting existing data)
+              const hasProviders = existingMovie.watchProviders && (
+                (existingMovie.watchProviders.flatrate && existingMovie.watchProviders.flatrate.length > 0) ||
+                (existingMovie.watchProviders.buy && existingMovie.watchProviders.buy.length > 0) ||
+                (existingMovie.watchProviders.rent && existingMovie.watchProviders.rent.length > 0)
+              );
+              
+              // Only update if no providers exist yet, or if new data has providers
+              const hasNewProviders = watchProviders.flatrate.length > 0 || watchProviders.buy.length > 0 || watchProviders.rent.length > 0;
+              
+              if (!hasProviders || hasNewProviders) {
+                await Movie.findOneAndUpdate(
+                  { tmdbId: movieData.id },
+                  { $set: { watchProviders: watchProviders } },
+                  { new: true } // Return updated document (but we don't use it)
+                );
+                await this.addLog(jobId, `Updated: ${movieDetail.title} (${movieDetail.id})`, 'info');
+              } else {
+                await this.addLog(jobId, `Skipped: ${movieDetail.title} (${movieDetail.id}) - already has providers`, 'info');
+              }
             }
             
             processedMovies++;
             const progress = Math.round((processedMovies / totalMovies) * 100);
+            // Log progress every 10 movies
+            if (processedMovies % 10 === 0) {
+              await this.addLog(jobId, `Progress: ${processedMovies}/${totalMovies} movies (${progress}%)`, 'info');
+            }
             await this.updateJobProgress(jobId, progress, 'running', processedMovies, totalMovies);
             
           } catch (movieError) {
-            console.error(`Error processing movie ${movieData.id}:`, movieError.message);
+            await this.addLog(jobId, `Error processing movie ${movieData.id}: ${movieError.message}`, 'error');
           }
         }
 
@@ -195,11 +328,12 @@ class SyncService {
         await new Promise(resolve => setTimeout(resolve, 100));
       }
 
+      await this.addLog(jobId, `Sync completed: ${processedMovies}/${totalMovies} movies processed`, 'success');
       await this.completeJob(jobId, true);
       return { success: true, processed: processedMovies, total: totalMovies };
 
     } catch (error) {
-      console.error('Movies sync error:', error);
+      await this.addLog(jobId, `Sync failed: ${error.message}`, 'error');
       await this.completeJob(jobId, false, error.message);
       throw error;
     }
@@ -211,6 +345,7 @@ class SyncService {
       const job = await SyncJob.findById(jobId);
       if (!job) throw new Error('Job not found');
 
+      await this.addLog(jobId, 'Starting TV shows sync job', 'info');
       await this.updateJobProgress(jobId, 0, 'running', 0, 0);
 
       let totalShows = 0;
@@ -227,10 +362,20 @@ class SyncService {
       });
 
       totalShows = firstPageResponse.data.total_results;
+      await this.addLog(jobId, `Found ${totalShows} total TV shows to sync`, 'info');
       await this.updateJobProgress(jobId, 0, 'running', 0, totalShows);
 
       // Process each page
       for (let page = 1; page <= Math.min(pageLimit, firstPageResponse.data.total_pages); page++) {
+        // Check if job should stop
+        if (this.shouldStop(jobId)) {
+          await this.addLog(jobId, 'Sync job stopped by user', 'warning');
+          await this.updateJobProgress(jobId, (processedShows / totalShows * 100), 'paused', processedShows, totalShows);
+          break;
+        }
+
+        await this.addLog(jobId, `Processing page ${page}/${Math.min(pageLimit, firstPageResponse.data.total_pages)}`, 'info');
+        
         const response = await axios.get(`${this.tmdbBaseUrl}/tv/popular`, {
           params: {
             api_key: this.tmdbApiKey,
@@ -242,18 +387,51 @@ class SyncService {
         const shows = response.data.results;
         
         for (const showData of shows) {
+          // Check if job should stop
+          if (this.shouldStop(jobId)) {
+            await this.addLog(jobId, 'Sync job stopped by user', 'warning');
+            await this.updateJobProgress(jobId, (processedShows / totalShows * 100), 'paused', processedShows, totalShows);
+            break;
+          }
           try {
             // Check if TV show already exists
             const existingShow = await TvShow.findOne({ tmdbId: showData.id });
             
-            if (!existingShow) {
-              // Get detailed TV show info
-              const detailResponse = await axios.get(`${this.tmdbBaseUrl}/tv/${showData.id}`, {
-                params: { api_key: this.tmdbApiKey }
-              });
+            // Get detailed TV show info to fetch watch providers
+            const detailResponse = await axios.get(`${this.tmdbBaseUrl}/tv/${showData.id}`, {
+              params: { 
+                api_key: this.tmdbApiKey,
+                append_to_response: 'watch/providers'
+              }
+            });
 
-              const showDetail = detailResponse.data;
-              
+            const showDetail = detailResponse.data;
+            
+            // Get watch providers (US region as default)
+            let watchProviders = { flatrate: [], buy: [], rent: [] };
+            if (showDetail['watch/providers'] && showDetail['watch/providers'].results && showDetail['watch/providers'].results.US) {
+              const usProviders = showDetail['watch/providers'].results.US;
+              watchProviders.flatrate = (usProviders.flatrate || []).map(p => ({
+                providerId: p.provider_id,
+                providerName: p.provider_name,
+                logoPath: p.logo_path
+              }));
+              watchProviders.buy = (usProviders.buy || []).map(p => ({
+                providerId: p.provider_id,
+                providerName: p.provider_name,
+                logoPath: p.logo_path
+              }));
+              watchProviders.rent = (usProviders.rent || []).map(p => ({
+                providerId: p.provider_id,
+                providerName: p.provider_name,
+                logoPath: p.logo_path
+              }));
+            }
+            
+            if (!existingShow) {
+              // Resolve genre ObjectIds
+              const genreObjectIds = await this.resolveGenreObjectIds(showDetail.genres);
+
               // Create new TV show
               const newShow = new TvShow({
                 tmdbId: showDetail.id,
@@ -266,7 +444,7 @@ class SyncService {
                 voteAverage: showDetail.vote_average,
                 voteCount: showDetail.vote_count,
                 popularity: showDetail.popularity,
-                genres: showDetail.genres.map(g => g.id),
+                genres: genreObjectIds,
                 adult: showDetail.adult,
                 originalLanguage: showDetail.original_language,
                 originalName: showDetail.original_name,
@@ -274,18 +452,46 @@ class SyncService {
                 numberOfSeasons: showDetail.number_of_seasons,
                 status: showDetail.status,
                 tagline: showDetail.tagline,
-                type: showDetail.type
+                type: showDetail.type,
+                watchProviders: watchProviders
               });
 
               await newShow.save();
+              await this.addLog(jobId, `Created: ${showDetail.name} (${showDetail.id})`, 'success');
+            } else {
+              // Update existing TV show - SAFE: Only updates watchProviders field, no data loss
+              // Only update if watchProviders is empty or missing (prevent overwriting existing data)
+              const hasProviders = existingShow.watchProviders && (
+                (existingShow.watchProviders.flatrate && existingShow.watchProviders.flatrate.length > 0) ||
+                (existingShow.watchProviders.buy && existingShow.watchProviders.buy.length > 0) ||
+                (existingShow.watchProviders.rent && existingShow.watchProviders.rent.length > 0)
+              );
+              
+              // Only update if no providers exist yet, or if new data has providers
+              const hasNewProviders = watchProviders.flatrate.length > 0 || watchProviders.buy.length > 0 || watchProviders.rent.length > 0;
+              
+              if (!hasProviders || hasNewProviders) {
+                await TvShow.findOneAndUpdate(
+                  { tmdbId: showData.id },
+                  { $set: { watchProviders: watchProviders } },
+                  { new: true } // Return updated document (but we don't use it)
+                );
+                await this.addLog(jobId, `Updated: ${showDetail.name} (${showDetail.id})`, 'info');
+              } else {
+                await this.addLog(jobId, `Skipped: ${showDetail.name} (${showDetail.id}) - already has providers`, 'info');
+              }
             }
             
             processedShows++;
             const progress = Math.round((processedShows / totalShows) * 100);
+            // Log progress every 10 shows
+            if (processedShows % 10 === 0) {
+              await this.addLog(jobId, `Progress: ${processedShows}/${totalShows} TV shows (${progress}%)`, 'info');
+            }
             await this.updateJobProgress(jobId, progress, 'running', processedShows, totalShows);
             
           } catch (showError) {
-            console.error(`Error processing TV show ${showData.id}:`, showError.message);
+            await this.addLog(jobId, `Error processing TV show ${showData.id}: ${showError.message}`, 'error');
           }
         }
 
@@ -293,11 +499,12 @@ class SyncService {
         await new Promise(resolve => setTimeout(resolve, 100));
       }
 
+      await this.addLog(jobId, `Sync completed: ${processedShows}/${totalShows} TV shows processed`, 'success');
       await this.completeJob(jobId, true);
       return { success: true, processed: processedShows, total: totalShows };
 
     } catch (error) {
-      console.error('TV shows sync error:', error);
+      await this.addLog(jobId, `Sync failed: ${error.message}`, 'error');
       await this.completeJob(jobId, false, error.message);
       throw error;
     }
@@ -334,6 +541,13 @@ class SyncService {
       await this.updateJobProgress(jobId, 0, 'running', 0, totalGenres);
 
       for (const genreData of genresToProcess) {
+        // Check if job should stop
+        if (this.shouldStop(jobId)) {
+          console.log(`Sync job ${jobId} stopped by user`);
+          await this.updateJobProgress(jobId, (processedGenres / totalGenres * 100), 'paused', processedGenres, totalGenres);
+          break;
+        }
+
         try {
           // Check if genre already exists
           const existingGenre = await Genre.findOne({ tmdbId: genreData.id });
@@ -410,24 +624,40 @@ class SyncService {
 
       // Sync genres first (needed for movies and TV shows)
       if (job.config.includeGenres !== false) {
+        if (this.shouldStop(jobId)) {
+          await this.updateJobProgress(jobId, 10, 'paused', 0, 100);
+          throw new Error('Job stopped by user');
+        }
         await this.updateJobProgress(jobId, 10, 'running', 0, 100);
         results.genres = await this.syncGenres(jobId);
       }
 
       // Sync movies
       if (job.config.includeMovies !== false) {
+        if (this.shouldStop(jobId)) {
+          await this.updateJobProgress(jobId, 30, 'paused', 0, 100);
+          throw new Error('Job stopped by user');
+        }
         await this.updateJobProgress(jobId, 30, 'running', 0, 100);
         results.movies = await this.syncMovies(jobId);
       }
 
       // Sync TV shows
       if (job.config.includeTvShows !== false) {
+        if (this.shouldStop(jobId)) {
+          await this.updateJobProgress(jobId, 60, 'paused', 0, 100);
+          throw new Error('Job stopped by user');
+        }
         await this.updateJobProgress(jobId, 60, 'running', 0, 100);
         results.tvshows = await this.syncTvShows(jobId);
       }
 
       // Sync users
       if (job.config.includeUsers !== false) {
+        if (this.shouldStop(jobId)) {
+          await this.updateJobProgress(jobId, 90, 'paused', 0, 100);
+          throw new Error('Job stopped by user');
+        }
         await this.updateJobProgress(jobId, 90, 'running', 0, 100);
         results.users = await this.syncUsers(jobId);
       }
@@ -453,7 +683,12 @@ class SyncService {
       throw new Error('Job is already running');
     }
 
+    // Clear any previous stop flag
+    this.stopFlags.delete(jobId);
     this.runningJobs.set(jobId, true);
+
+    // Log job start
+    await this.addLog(job._id || jobId, `Job started by user`, 'info');
 
     try {
       let result;
@@ -481,7 +716,46 @@ class SyncService {
       return result;
     } finally {
       this.runningJobs.delete(jobId);
+      this.stopFlags.delete(jobId);
     }
+  }
+
+  // Stop a running job
+  async stopJob(jobId) {
+    const job = await SyncJob.findById(jobId);
+    if (!job) throw new Error('Job not found');
+
+    // Check if job is running
+    if (!this.runningJobs.has(jobId)) {
+      throw new Error('Job is not running');
+    }
+
+    // Set stop flag
+    this.stopFlags.set(jobId, true);
+
+    // Update job status
+    await SyncJob.findByIdAndUpdate(jobId, { 
+      status: 'paused',
+      errorMessage: 'Job stopped by user'
+    });
+
+    // Clean up after a delay to allow job to finish gracefully
+    setTimeout(() => {
+      this.runningJobs.delete(jobId);
+      this.stopFlags.delete(jobId);
+    }, 5000);
+
+    return { message: 'Job stop requested', jobId };
+  }
+
+  // Check if a job should stop
+  shouldStop(jobId) {
+    return this.stopFlags.has(jobId) && this.stopFlags.get(jobId) === true;
+  }
+
+  // Check if a job is actually running
+  isJobRunning(jobId) {
+    return this.runningJobs.has(jobId);
   }
 
   // Get sync statistics

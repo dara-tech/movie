@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router-dom';
 import api from '../services/api';
 import { Button } from './ui/button';
 import { Card, CardContent } from './ui/card';
 import { Badge } from './ui/badge';
-import { Play, Star, Calendar, Clock } from 'lucide-react';
+import { Play, Star, Calendar, Clock, Users, Film, ChevronDown, ChevronUp, TrendingUp, MessageSquare, Video, Images } from 'lucide-react';
 import streamingService, { StreamingOption } from '../services/streamingService';
 import MoviePlayer from './MoviePlayer';
 import { MovieSEO } from './SEO';
@@ -32,14 +32,83 @@ interface Movie {
   isAvailable: boolean;
 }
 
+interface Cast {
+  id: number;
+  name: string;
+  character: string;
+  profilePath?: string;
+  order: number;
+}
+
+interface Crew {
+  id: number;
+  name: string;
+  job: string;
+  profilePath?: string;
+}
+
+interface SimilarMovie {
+  _id: string;
+  title: string;
+  posterPath?: string;
+  releaseDate: string;
+  voteAverage: number;
+}
+
+interface Review {
+  _id: string;
+  user: {
+    username: string;
+    createdAt: string;
+  };
+  rating: number;
+  review: string;
+  addedAt: string;
+}
+
+interface Video {
+  id: string;
+  key: string;
+  name: string;
+  site: string;
+  size: number;
+  type: string;
+  official: boolean;
+}
+
+interface Image {
+  filePath: string;
+  aspectRatio: number;
+  height: number;
+  width: number;
+  voteAverage: number;
+  voteCount: number;
+}
+
 
 const MovieDetailPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
   const [movie, setMovie] = useState<Movie | null>(null);
   const [loading, setLoading] = useState(true);
   const [selectedStreaming, setSelectedStreaming] = useState<StreamingOption | null>(null);
   const [streamingOptions, setStreamingOptions] = useState<StreamingOption[]>([]);
   const [showPlayer, setShowPlayer] = useState(false);
+  const [cast, setCast] = useState<Cast[]>([]);
+  const [crew, setCrew] = useState<Crew[]>([]);
+  const [castLoading, setCastLoading] = useState(false);
+  const [expandedCast, setExpandedCast] = useState(false);
+  const [similarMovies, setSimilarMovies] = useState<SimilarMovie[]>([]);
+  const [similarLoading, setSimilarLoading] = useState(false);
+  const [reviews, setReviews] = useState<Review[]>([]);
+  const [reviewsLoading, setReviewsLoading] = useState(false);
+  const [reviewStats, setReviewStats] = useState<any>(null);
+  const [videos, setVideos] = useState<any>({});
+  const [videosLoading, setVideosLoading] = useState(false);
+  const [images, setImages] = useState<any>({});
+  const [imagesLoading, setImagesLoading] = useState(false);
+  const [selectedVideo, setSelectedVideo] = useState<Video | null>(null);
+  const [selectedImage, setSelectedImage] = useState<Image | null>(null);
 
   const fetchMovie = useCallback(async () => {
     try {
@@ -62,11 +131,83 @@ const MovieDetailPage: React.FC = () => {
     }
   }, [id]);
 
+  const fetchCast = useCallback(async () => {
+    if (!id) return;
+    try {
+      setCastLoading(true);
+      const response = await api.get(`/api/movies/${id}/cast`);
+      setCast(response.data.cast);
+      setCrew(response.data.crew);
+    } catch (error) {
+      console.error('Error fetching cast:', error);
+    } finally {
+      setCastLoading(false);
+    }
+  }, [id]);
+
+  const fetchSimilarMovies = useCallback(async () => {
+    if (!id) return;
+    try {
+      setSimilarLoading(true);
+      const response = await api.get(`/api/movies/${id}/similar`);
+      setSimilarMovies(response.data.movies);
+    } catch (error) {
+      console.error('Error fetching similar movies:', error);
+    } finally {
+      setSimilarLoading(false);
+    }
+  }, [id]);
+
+  const fetchReviews = useCallback(async () => {
+    if (!id) return;
+    try {
+      setReviewsLoading(true);
+      const response = await api.get(`/api/movies/${id}/reviews`);
+      setReviews(response.data.reviews);
+      setReviewStats(response.data.stats);
+    } catch (error) {
+      console.error('Error fetching reviews:', error);
+    } finally {
+      setReviewsLoading(false);
+    }
+  }, [id]);
+
+  const fetchVideos = useCallback(async () => {
+    if (!id) return;
+    try {
+      setVideosLoading(true);
+      const response = await api.get(`/api/movies/${id}/videos`);
+      setVideos(response.data);
+    } catch (error) {
+      console.error('Error fetching videos:', error);
+    } finally {
+      setVideosLoading(false);
+    }
+  }, [id]);
+
+  const fetchImages = useCallback(async () => {
+    if (!id) return;
+    try {
+      setImagesLoading(true);
+      const response = await api.get(`/api/movies/${id}/images`);
+      setImages(response.data);
+    } catch (error) {
+      console.error('Error fetching images:', error);
+    } finally {
+      setImagesLoading(false);
+    }
+  }, [id]);
+
   useEffect(() => {
     if (id) {
       fetchMovie();
+      fetchCast();
+      fetchSimilarMovies();
+      fetchReviews();
+      fetchVideos();
+      fetchImages();
     }
-  }, [id, fetchMovie]);
+  }, [id, fetchMovie, fetchCast, fetchSimilarMovies, fetchReviews, fetchVideos, fetchImages]);
 
   const handleStreamingChange = useCallback((option: StreamingOption) => {
     setSelectedStreaming(option);
@@ -429,6 +570,370 @@ const MovieDetailPage: React.FC = () => {
             </div>
           </div>
         </div>
+
+        {/* Cast & Crew Section */}
+        {(cast.length > 0 || crew.length > 0) && (
+          <div className="container mx-auto px-6 py-8 space-y-12">
+            {/* Section Header */}
+            <div className="flex items-center gap-4">
+              <div className="w-16 h-0.5 bg-red-600"></div>
+              <Users className="h-8 w-8 text-red-600" />
+              <h2 className="text-3xl font-bold text-white uppercase tracking-wider">Cast & Crew</h2>
+            </div>
+
+            {/* Crew */}
+            {crew.length > 0 && (
+              <div>
+                <div className="flex items-center gap-3 mb-6">
+                  <Film className="h-6 w-6 text-blue-600" />
+                  <h3 className="text-2xl font-bold text-white uppercase tracking-wide">Crew</h3>
+                  <div className="flex-1 h-px bg-gray-800"></div>
+                  <span className="text-gray-500 text-sm uppercase tracking-wide">{crew.length} Members</span>
+                </div>
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+                  {crew.map((person) => (
+                    <div 
+                      key={person.id} 
+                      onClick={() => navigate(`/cast/${person.id}`)}
+                      className="group relative bg-black border border-gray-800 hover:border-blue-600 rounded-none overflow-hidden transition-all duration-300 hover:scale-105 cursor-pointer"
+                    >
+                      <div className="aspect-[3/4] w-full overflow-hidden bg-gray-950 relative">
+                        {person.profilePath ? (
+                          <>
+                            <img
+                              src={`https://image.tmdb.org/t/p/w300${person.profilePath}`}
+                              alt={person.name}
+                              className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"
+                            />
+                            <div className="absolute inset-0 bg-gradient-to-t from-black via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
+                          </>
+                        ) : (
+                          <div className="w-full h-full flex items-center justify-center text-gray-700 text-5xl font-black group-hover:text-blue-600 transition-colors duration-300">
+                            {person.name.charAt(0)}
+                          </div>
+                        )}
+                      </div>
+                      <div className="p-3 border-t border-gray-900">
+                        <h4 className="font-bold text-white text-sm mb-1 uppercase tracking-wide truncate group-hover:text-blue-600 transition-colors">{person.name}</h4>
+                        <p className="text-gray-600 text-xs uppercase tracking-wide truncate">{person.job}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Cast */}
+            {cast.length > 0 && (
+              <div>
+                <div className="flex items-center gap-3 mb-6">
+                  <Users className="h-6 w-6 text-red-600" />
+                  <h3 className="text-2xl font-bold text-white uppercase tracking-wide">Cast</h3>
+                  <div className="flex-1 h-px bg-gray-800"></div>
+                  <span className="text-gray-500 text-sm uppercase tracking-wide">{cast.length} Actors</span>
+                </div>
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+                  {(expandedCast ? cast : cast.slice(0, 12)).map((actor) => (
+                    <div 
+                      key={actor.id} 
+                      onClick={() => navigate(`/cast/${actor.id}`)}
+                      className="group relative bg-black border border-gray-800 hover:border-red-600 rounded-none overflow-hidden transition-all duration-300 hover:scale-105 cursor-pointer"
+                    >
+                      <div className="aspect-[3/4] w-full overflow-hidden bg-gray-950 relative">
+                        {actor.profilePath ? (
+                          <>
+                            <img
+                              src={`https://image.tmdb.org/t/p/w300${actor.profilePath}`}
+                              alt={actor.name}
+                              className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"
+                            />
+                            <div className="absolute inset-0 bg-gradient-to-t from-black via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
+                            {actor.order === 0 && (
+                              <div className="absolute top-2 left-2 bg-red-600 text-white text-xs font-bold px-2 py-1 uppercase tracking-wide">
+                                Lead
+                              </div>
+                            )}
+                          </>
+                        ) : (
+                          <div className="w-full h-full flex items-center justify-center text-gray-700 text-5xl font-black group-hover:text-red-600 transition-colors duration-300">
+                            {actor.name.charAt(0)}
+                          </div>
+                        )}
+                      </div>
+                      <div className="p-3 border-t border-gray-900">
+                        <h4 className="font-bold text-white text-sm mb-1 uppercase tracking-wide truncate group-hover:text-red-600 transition-colors">{actor.name}</h4>
+                        <p className="text-gray-600 text-xs uppercase tracking-wide truncate">{actor.character}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                {cast.length > 12 && (
+                  <div className="flex justify-center mt-8">
+                    <Button
+                      onClick={() => setExpandedCast(!expandedCast)}
+                      className="bg-black border border-gray-800 hover:border-red-600 text-white px-8 py-3 rounded-none uppercase tracking-wide font-bold transition-all"
+                    >
+                      {expandedCast ? (
+                        <>
+                          <ChevronUp className="h-5 w-5 mr-2" />
+                          Show Less
+                        </>
+                      ) : (
+                        <>
+                          <ChevronDown className="h-5 w-5 mr-2" />
+                          View All Cast ({cast.length})
+                        </>
+                      )}
+                    </Button>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {castLoading && (
+              <div className="flex flex-col items-center justify-center py-12">
+                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-red-600"></div>
+                <p className="text-gray-500 mt-4 uppercase tracking-wide">Loading Cast & Crew...</p>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Trailers & Videos Section */}
+        {(videos.trailers?.length > 0 || videos.teasers?.length > 0 || videos.clips?.length > 0) && (
+          <div className="container mx-auto px-6 py-8 space-y-6">
+            <div className="flex items-center gap-4">
+              <div className="w-16 h-0.5 bg-red-600"></div>
+              <Video className="h-8 w-8 text-red-600" />
+              <h2 className="text-3xl font-bold text-white uppercase tracking-wider">Trailers & Videos</h2>
+              <div className="flex-1 h-px bg-gray-800"></div>
+            </div>
+
+            {videosLoading ? (
+              <div className="flex flex-col items-center justify-center py-12">
+                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-red-600"></div>
+                <p className="text-gray-500 mt-4 uppercase tracking-wide">Loading Videos...</p>
+              </div>
+            ) : (
+              <div className="space-y-8">
+                {/* Trailers */}
+                {videos.trailers?.length > 0 && (
+                  <div>
+                    <h3 className="text-xl font-bold text-white mb-4 uppercase tracking-wide">Trailers</h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {videos.trailers.slice(0, 4).map((trailer: Video) => (
+                        <div
+                          key={trailer.id}
+                          onClick={() => setSelectedVideo(trailer)}
+                          className="group cursor-pointer bg-black border border-gray-800 hover:border-red-600 rounded-none overflow-hidden transition-all"
+                        >
+                          <div className="aspect-video w-full relative">
+                            <img
+                              src={`https://img.youtube.com/vi/${trailer.key}/maxresdefault.jpg`}
+                              alt={trailer.name}
+                              className="w-full h-full object-cover"
+                            />
+                            <div className="absolute inset-0 bg-black/40 group-hover:bg-black/20 transition-colors flex items-center justify-center">
+                              <div className="bg-black/80 border border-white rounded-none p-4 group-hover:scale-110 transition-transform">
+                                <Play className="h-12 w-12 text-white fill-white" />
+                              </div>
+                            </div>
+                          </div>
+                          <div className="p-4 border-t border-gray-900">
+                            <h4 className="font-bold text-white uppercase tracking-wide">{trailer.name}</h4>
+                            {trailer.official && (
+                              <Badge className="bg-green-600 text-white mt-2 uppercase tracking-wide rounded-none">
+                                Official
+                              </Badge>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Clips */}
+                {videos.clips?.length > 0 && videos.trailers?.length === 0 && (
+                  <div>
+                    <h3 className="text-xl font-bold text-white mb-4 uppercase tracking-wide">Clips</h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {videos.clips.slice(0, 4).map((clip: Video) => (
+                        <div
+                          key={clip.id}
+                          onClick={() => setSelectedVideo(clip)}
+                          className="group cursor-pointer bg-black border border-gray-800 hover:border-red-600 rounded-none overflow-hidden transition-all"
+                        >
+                          <div className="aspect-video w-full relative">
+                            <img
+                              src={`https://img.youtube.com/vi/${clip.key}/maxresdefault.jpg`}
+                              alt={clip.name}
+                              className="w-full h-full object-cover"
+                            />
+                            <div className="absolute inset-0 bg-black/40 group-hover:bg-black/20 transition-colors flex items-center justify-center">
+                              <div className="bg-black/80 border border-white rounded-none p-4 group-hover:scale-110 transition-transform">
+                                <Play className="h-12 w-12 text-white fill-white" />
+                              </div>
+                            </div>
+                          </div>
+                          <div className="p-4 border-t border-gray-900">
+                            <h4 className="font-bold text-white uppercase tracking-wide">{clip.name}</h4>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Images Gallery Section */}
+        {(images.backdrops?.length > 0 || images.posters?.length > 0) && (
+          <div className="container mx-auto px-6 py-8 space-y-6">
+            <div className="flex items-center gap-4">
+              <div className="w-16 h-0.5 bg-red-600"></div>
+              <Images className="h-8 w-8 text-red-600" />
+              <h2 className="text-3xl font-bold text-white uppercase tracking-wider">Images</h2>
+              <div className="flex-1 h-px bg-gray-800"></div>
+            </div>
+
+            {imagesLoading ? (
+              <div className="flex flex-col items-center justify-center py-12">
+                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-red-600"></div>
+                <p className="text-gray-500 mt-4 uppercase tracking-wide">Loading Images...</p>
+              </div>
+            ) : (
+              <div className="space-y-8">
+                {/* Backdrops */}
+                {images.backdrops?.length > 0 && (
+                  <div>
+                    <h3 className="text-xl font-bold text-white mb-4 uppercase tracking-wide">Backdrops</h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                      {images.backdrops.slice(0, 6).map((image: Image, idx: number) => (
+                        <div
+                          key={idx}
+                          onClick={() => setSelectedImage(image)}
+                          className="group cursor-pointer bg-black border border-gray-800 hover:border-red-600 rounded-none overflow-hidden transition-all aspect-video"
+                        >
+                          <img
+                            src={`https://image.tmdb.org/t/p/w780${image.filePath}`}
+                            alt="Backdrop"
+                            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Similar Movies Section */}
+        {similarMovies.length > 0 && (
+          <div className="container mx-auto px-6 py-8 space-y-6">
+            <div className="flex items-center gap-4">
+              <div className="w-16 h-0.5 bg-red-600"></div>
+              <TrendingUp className="h-8 w-8 text-red-600" />
+              <h2 className="text-3xl font-bold text-white uppercase tracking-wider">Similar Movies</h2>
+              <div className="flex-1 h-px bg-gray-800"></div>
+              <span className="text-gray-500 text-sm uppercase tracking-wide">{similarMovies.length} Movies</span>
+            </div>
+
+            {similarLoading ? (
+              <div className="flex flex-col items-center justify-center py-12">
+                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-red-600"></div>
+                <p className="text-gray-500 mt-4 uppercase tracking-wide">Loading Similar Movies...</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
+                {similarMovies.map((similarMovie) => (
+                  <div
+                    key={similarMovie._id}
+                    onClick={() => navigate(`/movie/${similarMovie._id}`)}
+                    className="group cursor-pointer bg-black border border-gray-800 hover:border-red-600 rounded-none overflow-hidden transition-all duration-300 hover:scale-105"
+                  >
+                    <div className="aspect-[3/4] w-full overflow-hidden bg-gray-950 relative">
+                      {similarMovie.posterPath ? (
+                        <>
+                          <img
+                            src={`https://image.tmdb.org/t/p/w300${similarMovie.posterPath}`}
+                            alt={similarMovie.title}
+                            className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"
+                          />
+                          <div className="absolute inset-0 bg-gradient-to-t from-black via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
+                        </>
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center text-gray-700 text-4xl font-black group-hover:text-red-600 transition-colors">
+                          {similarMovie.title.charAt(0)}
+                        </div>
+                      )}
+                      <div className="absolute top-2 right-2 bg-black/80 px-2 py-1 flex items-center gap-1">
+                        <Star className="h-3 w-3 text-yellow-500 fill-yellow-500" />
+                        <span className="text-white text-xs font-bold">{similarMovie.voteAverage.toFixed(1)}</span>
+                      </div>
+                    </div>
+                    <div className="p-3 border-t border-gray-900">
+                      <h4 className="font-bold text-white text-sm mb-1 uppercase tracking-wide truncate group-hover:text-red-600 transition-colors">{similarMovie.title}</h4>
+                      <p className="text-gray-600 text-xs uppercase tracking-wide">{new Date(similarMovie.releaseDate).getFullYear()}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Reviews Section */}
+        {reviewStats && reviewStats.totalReviews > 0 && (
+          <div className="container mx-auto px-6 py-8 space-y-6">
+            <div className="flex items-center gap-4">
+              <div className="w-16 h-0.5 bg-red-600"></div>
+              <MessageSquare className="h-8 w-8 text-red-600" />
+              <h2 className="text-3xl font-bold text-white uppercase tracking-wider">User Reviews</h2>
+              <div className="flex-1 h-px bg-gray-800"></div>
+              <span className="text-gray-500 text-sm uppercase tracking-wide">{reviewStats.totalReviews} Reviews</span>
+            </div>
+
+            {reviewsLoading ? (
+              <div className="flex flex-col items-center justify-center py-12">
+                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-red-600"></div>
+                <p className="text-gray-500 mt-4 uppercase tracking-wide">Loading Reviews...</p>
+              </div>
+            ) : (
+              <div className="space-y-6">
+                {reviews.map((review) => (
+                  <Card key={review._id} className="bg-black border border-gray-800 rounded-none">
+                    <CardContent className="p-6">
+                      <div className="flex items-start justify-between mb-4">
+                        <div>
+                          <div className="flex items-center gap-2 mb-2">
+                            <h4 className="font-bold text-white uppercase tracking-wide">{review.user.username}</h4>
+                            <Badge className="bg-yellow-600 text-black font-bold text-xs uppercase">
+                              <Star className="h-3 w-3 fill-current mr-1" />
+                              {review.rating}/5
+                            </Badge>
+                          </div>
+                          <p className="text-gray-500 text-xs uppercase tracking-wide">
+                            {new Date(review.addedAt).toLocaleDateString('en-US', {
+                              year: 'numeric',
+                              month: 'long',
+                              day: 'numeric'
+                            })}
+                          </p>
+                        </div>
+                      </div>
+                      <p className="text-gray-300 leading-relaxed whitespace-pre-line">{review.review}</p>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Movie Player Modal */}
@@ -438,6 +943,53 @@ const MovieDetailPage: React.FC = () => {
           onClose={handleClosePlayer}
           onWatchComplete={handleWatchComplete}
         />
+      )}
+
+      {/* Video Modal */}
+      {selectedVideo && (
+        <div className="fixed inset-0 bg-black/95 z-50 flex items-center justify-center p-4" onClick={() => setSelectedVideo(null)}>
+          <div className="w-full max-w-4xl" onClick={(e) => e.stopPropagation()}>
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-2xl font-bold text-white uppercase tracking-wide">{selectedVideo.name}</h3>
+              <button
+                onClick={() => setSelectedVideo(null)}
+                className="text-white hover:text-red-600 text-2xl font-bold uppercase tracking-wide"
+              >
+                ✕ Close
+              </button>
+            </div>
+            <div className="aspect-video w-full">
+              <iframe
+                title={selectedVideo.name}
+                src={`https://www.youtube.com/embed/${selectedVideo.key}?autoplay=1`}
+                className="w-full h-full border border-gray-800"
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                allowFullScreen
+              ></iframe>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Image Modal */}
+      {selectedImage && (
+        <div className="fixed inset-0 bg-black z-50 flex items-center justify-center p-4" onClick={() => setSelectedImage(null)}>
+          <div className="max-w-7xl max-h-full" onClick={(e) => e.stopPropagation()}>
+            <div className="flex justify-end items-center mb-4">
+              <button
+                onClick={() => setSelectedImage(null)}
+                className="text-white hover:text-red-600 text-2xl font-bold uppercase tracking-wide"
+              >
+                ✕ Close
+              </button>
+            </div>
+            <img
+              src={`https://image.tmdb.org/t/p/original${selectedImage.filePath}`}
+              alt="Full size image"
+              className="max-w-full max-h-[90vh] object-contain"
+            />
+          </div>
+        </div>
       )}
     </div>
   );

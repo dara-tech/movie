@@ -84,15 +84,27 @@ const AdminDashboard: React.FC = () => {
   const fetchDashboardData = async () => {
     try {
       setLoading(true);
+      setError(null);
+      
+      console.log('Fetching dashboard data...');
       const [statsResponse, healthResponse] = await Promise.all([
         api.get('/api/admin/dashboard/stats'),
         api.get('/api/admin/system/health')
       ]);
 
-      setStats(statsResponse.data.data);
-      setSystemHealth(healthResponse.data.data);
+      console.log('Dashboard data fetched:', { stats: statsResponse.data, health: healthResponse.data });
+      
+      if (statsResponse.data && statsResponse.data.data) {
+        setStats(statsResponse.data.data);
+      }
+      
+      if (healthResponse.data && healthResponse.data.data) {
+        setSystemHealth(healthResponse.data.data);
+      }
     } catch (err: any) {
-      setError(err.response?.data?.message || 'Failed to fetch dashboard data');
+      console.error('Error fetching dashboard data:', err);
+      const errorMessage = err.response?.data?.message || err.message || 'Failed to fetch dashboard data';
+      setError(errorMessage);
     } finally {
       setLoading(false);
     }

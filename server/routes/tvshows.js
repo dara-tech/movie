@@ -15,8 +15,8 @@ cache.clear();
 
 // Cache helper functions
 const getCacheKey = (req) => {
-  const { page, limit, genre, year, sortBy, order, search, minRating, status, type } = req.query;
-  return `tvshows:${JSON.stringify({ page, limit, genre, year, sortBy, order, search, minRating, status, type })}`;
+  const { page, limit, genre, year, sortBy, order, search, minRating, status, type, provider } = req.query;
+  return `tvshows:${JSON.stringify({ page, limit, genre, year, sortBy, order, search, minRating, status, type, provider })}`;
 };
 
 const getCachedData = (key) => {
@@ -55,7 +55,8 @@ router.get('/', async (req, res) => {
       search,
       minRating,
       status,
-      type
+      type,
+      provider // Streaming service provider ID
     } = req.query;
 
     // Handle multiple genre parameters
@@ -110,15 +111,41 @@ router.get('/', async (req, res) => {
       query.type = type;
     }
 
+    // Add streaming provider filter
+    const providerFilter = [];
+    if (provider) {
+      const providerId = parseInt(provider);
+      if (!isNaN(providerId)) {
+        providerFilter.push(
+          { 'watchProviders.flatrate.providerId': providerId },
+          { 'watchProviders.buy.providerId': providerId },
+          { 'watchProviders.rent.providerId': providerId }
+        );
+      }
+    }
+
     // Add search filter
+    const searchFilter = [];
     if (search) {
       const searchRegex = new RegExp(search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
-      query.$or = [
+      searchFilter.push(
         { name: searchRegex },
         { originalName: searchRegex },
         { overview: searchRegex },
         { 'genres.name': searchRegex }
+      );
+    }
+
+    // Combine filters correctly
+    if (providerFilter.length > 0 && searchFilter.length > 0) {
+      query.$and = [
+        { $or: providerFilter },
+        { $or: searchFilter }
       ];
+    } else if (providerFilter.length > 0) {
+      query.$or = providerFilter;
+    } else if (searchFilter.length > 0) {
+      query.$or = searchFilter;
     }
 
     const sortOptions = {};
@@ -272,6 +299,34 @@ router.get('/genre/:genreId', async (req, res) => {
   } catch (error) {
     console.error('Error fetching TV shows by genre:', error);
     res.status(500).json({ message: 'Error fetching TV shows by genre' });
+  }
+});
+
+// Get watch providers list (must be before /:id route)
+router.get('/watch-providers', async (req, res) => {
+  try {
+    const providers = await tmdbService.getWatchProviders('tv');
+    // Filter to only show popular streaming services
+    const popularProviders = [
+      8,    // Netflix
+      9,    // Amazon Prime Video
+      337,  // Disney+
+      350,  // Apple TV+
+      531,  // Paramount+
+      283,  // Crunchyroll
+      384,  // HBO Max
+      521,  // Showtime
+      386,  // Starz
+      68,   // Microsoft Store
+      15,   // Hulu
+      1899  // Max
+    ];
+    
+    const filteredProviders = providers.results.filter(p => popularProviders.includes(p.provider_id));
+    res.json({ providers: filteredProviders });
+  } catch (error) {
+    console.error('Error fetching watch providers:', error);
+    res.status(500).json({ message: 'Error fetching watch providers' });
   }
 });
 

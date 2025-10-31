@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+const mongoose = require('mongoose');
 const Movie = require('../models/Movie');
 const Genre = require('../models/Genre');
 
@@ -12,8 +13,8 @@ cache.clear();
 
 // Cache helper functions
 const getCacheKey = (req) => {
-  const { page, limit, genre, year, sortBy, order, search, minRating } = req.query;
-  return `movies:${JSON.stringify({ page, limit, genre, year, sortBy, order, search, minRating })}`;
+  const { page, limit, genre, year, sortBy, order, search, minRating, provider } = req.query;
+  return `movies:${JSON.stringify({ page, limit, genre, year, sortBy, order, search, minRating, provider })}`;
 };
 
 const getCachedData = (key) => {
@@ -33,6 +34,7 @@ const setCachedData = (key, data) => {
 const Watchlist = require('../models/Watchlist');
 const WatchHistory = require('../models/WatchHistory');
 const auth = require('../middleware/auth');
+const tmdbService = require('../services/tmdbService');
 
 // Create a new movie (admin only)
 router.post('/', async (req, res) => {
@@ -81,7 +83,8 @@ router.get('/', async (req, res) => {
       sortBy = 'popularity',
       order = 'desc',
       search,
-      minRating
+      minRating,
+      provider // Streaming service provider ID (e.g., 8 for Netflix, 390 for Disney+)
     } = req.query;
 
     // Handle multiple genre parameters
@@ -92,7 +95,6 @@ router.get('/', async (req, res) => {
     // Add genre filter
     if (genres.length > 0) {
       // Find genre by name or ID
-      const mongoose = require('mongoose');
       const genreIds = [];
       
       for (const genreParam of genres) {
@@ -128,15 +130,42 @@ router.get('/', async (req, res) => {
       query.voteAverage = { $gte: parseFloat(minRating) };
     }
 
+    // Add streaming provider filter
+    const providerFilter = [];
+    if (provider) {
+      const providerId = parseInt(provider);
+      if (!isNaN(providerId)) {
+        providerFilter.push(
+          { 'watchProviders.flatrate.providerId': providerId },
+          { 'watchProviders.buy.providerId': providerId },
+          { 'watchProviders.rent.providerId': providerId }
+        );
+      }
+    }
+
     // Add search filter with improved performance
+    const searchFilter = [];
     if (search) {
       const searchRegex = new RegExp(search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
-      query.$or = [
+      searchFilter.push(
         { title: searchRegex },
         { originalTitle: searchRegex },
         { overview: searchRegex },
         { 'genres.name': searchRegex }
+      );
+    }
+
+    // Combine filters correctly
+    if (providerFilter.length > 0 && searchFilter.length > 0) {
+      // Both provider and search - need to match both conditions
+      query.$and = [
+        { $or: providerFilter },
+        { $or: searchFilter }
       ];
+    } else if (providerFilter.length > 0) {
+      query.$or = providerFilter;
+    } else if (searchFilter.length > 0) {
+      query.$or = searchFilter;
     }
 
     const sortOptions = {};
@@ -192,6 +221,85 @@ router.get('/popular', async (req, res) => {
   } catch (error) {
     console.error('Error fetching popular movies:', error);
     res.status(500).json({ message: 'Error fetching popular movies' });
+  }
+});
+
+// Get recommended movies based on user preferences
+router.get('/recommendations', auth, async (req, res) => {
+  try {
+    const { limit = 10 } = req.query;
+    const userId = req.user.id;
+    
+    // Get user's watch history to understand preferences
+    const watchHistory = await WatchHistory.find({ user: userId })
+      .populate('movie')
+      .sort({ watchedAt: -1 })
+      .limit(50);
+
+    const watchlist = await Watchlist.find({ user: userId })
+      .populate('movie');
+
+    // Extract genres from watched movies
+    const genreFrequency = {};
+    const movieIds = new Set();
+    
+    watchHistory.forEach(entry => {
+      if (entry.movie && entry.movie.genres) {
+        entry.movie.genres.forEach(genre => {
+          const genreId = genre._id || genre;
+          genreFrequency[genreId] = (genreFrequency[genreId] || 0) + 1;
+        });
+        movieIds.add(entry.movie._id.toString());
+      }
+    });
+
+    watchlist.forEach(item => {
+      if (item.movie && item.movie.genres) {
+        item.movie.genres.forEach(genre => {
+          const genreId = genre._id || genre;
+          genreFrequency[genreId] = (genreFrequency[genreId] || 0) + 0.5;
+        });
+        movieIds.add(item.movie._id.toString());
+      }
+    });
+
+    // Get top 5 preferred genres
+    const topGenres = Object.entries(genreFrequency)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5)
+      .map(([genreId]) => new mongoose.Types.ObjectId(genreId));
+
+    // Find movies with similar genres that user hasn't seen
+    let recommendations = [];
+    
+    if (topGenres.length > 0) {
+      recommendations = await Movie.find({
+        isAvailable: true,
+        genres: { $in: topGenres },
+        _id: { $nin: Array.from(movieIds) }
+      })
+        .populate('genres', 'name')
+        .sort({ voteAverage: -1, popularity: -1 })
+        .limit(parseInt(limit));
+    }
+
+    // If not enough recommendations, add popular movies
+    if (recommendations.length < parseInt(limit)) {
+      const popularMovies = await Movie.find({
+        isAvailable: true,
+        _id: { $nin: [...Array.from(movieIds), ...recommendations.map(m => m._id)] }
+      })
+        .populate('genres', 'name')
+        .sort({ popularity: -1, voteAverage: -1 })
+        .limit(parseInt(limit) - recommendations.length);
+      
+      recommendations.push(...popularMovies);
+    }
+
+    res.json({ movies: recommendations });
+  } catch (error) {
+    console.error('Error fetching recommendations:', error);
+    res.status(500).json({ message: 'Error fetching recommendations' });
   }
 });
 
@@ -466,9 +574,388 @@ router.post('/:id/watch', auth, async (req, res) => {
   }
 });
 
+// Get similar movies
+router.get('/:id/similar', async (req, res) => {
+  try {
+    let movie;
+    
+    // Try to find by MongoDB _id first, then by tmdbId as fallback
+    if (mongoose.Types.ObjectId.isValid(req.params.id)) {
+      movie = await Movie.findById(req.params.id);
+    }
+    
+    if (!movie) {
+      const tmdbIdNum = parseInt(req.params.id);
+      if (!isNaN(tmdbIdNum)) {
+        movie = await Movie.findOne({ tmdbId: tmdbIdNum });
+      }
+    }
+    
+    if (!movie || !movie.tmdbId) {
+      return res.status(404).json({ message: 'Movie not found or missing TMDB ID' });
+    }
+
+    // Fetch similar movies from TMDB
+    const axios = require('axios');
+    const tmdbApiKey = process.env.TMDB_API_KEY;
+    const response = await axios.get(
+      `https://api.themoviedb.org/3/movie/${movie.tmdbId}/similar`,
+      {
+        params: {
+          api_key: tmdbApiKey,
+          language: 'en-US',
+          page: 1
+        }
+      }
+    );
+
+    // Get the first 10 similar movies and find them in our database
+    const tmdbMovies = response.data.results.slice(0, 10);
+    const similarMovies = [];
+
+    for (const tmdbMovie of tmdbMovies) {
+      const dbMovie = await Movie.findOne({ tmdbId: tmdbMovie.id }).populate('genres', 'name');
+      if (dbMovie) {
+        similarMovies.push({
+          _id: dbMovie._id,
+          title: dbMovie.title,
+          posterPath: dbMovie.posterPath,
+          releaseDate: dbMovie.releaseDate,
+          voteAverage: dbMovie.voteAverage
+        });
+      }
+    }
+
+    res.json({ movies: similarMovies });
+  } catch (error) {
+    console.error('Error fetching similar movies:', error);
+    res.status(500).json({ message: 'Error fetching similar movies', error: error.message });
+  }
+});
+
+// Get cast and crew for a movie
+router.get('/:id/cast', async (req, res) => {
+  try {
+    let movie;
+    
+    // Try to find by MongoDB _id first, then by tmdbId as fallback
+    if (mongoose.Types.ObjectId.isValid(req.params.id)) {
+      movie = await Movie.findById(req.params.id);
+    }
+    
+    if (!movie) {
+      const tmdbIdNum = parseInt(req.params.id);
+      if (!isNaN(tmdbIdNum)) {
+        movie = await Movie.findOne({ tmdbId: tmdbIdNum });
+      }
+    }
+    
+    if (!movie || !movie.tmdbId) {
+      return res.status(404).json({ message: 'Movie not found or missing TMDB ID' });
+    }
+
+    // Fetch cast from TMDB
+    const axios = require('axios');
+    const tmdbApiKey = process.env.TMDB_API_KEY;
+    const response = await axios.get(
+      `https://api.themoviedb.org/3/movie/${movie.tmdbId}/credits`,
+      {
+        params: {
+          api_key: tmdbApiKey,
+          language: 'en-US'
+        }
+      }
+    );
+
+    const { cast = [], crew = [] } = response.data;
+
+    // Get top cast (first 20) and key crew
+    const topCast = cast.slice(0, 20).map(actor => ({
+      id: actor.id,
+      name: actor.name,
+      character: actor.character,
+      profilePath: actor.profile_path,
+      order: actor.order
+    }));
+
+    // Get key crew members (director, writer, producer, etc.)
+    const keyCrew = crew
+      .filter(person => 
+        ['Director', 'Writer', 'Producer', 'Executive Producer', 'Screenplay'].includes(person.job)
+      )
+      .map(person => ({
+        id: person.id,
+        name: person.name,
+        job: person.job,
+        profilePath: person.profile_path
+      }));
+
+    res.json({ cast: topCast, crew: keyCrew });
+  } catch (error) {
+    console.error('Error fetching cast:', error);
+    res.status(500).json({ message: 'Error fetching cast', error: error.message });
+  }
+});
+
+// Get images for a movie
+router.get('/:id/images', async (req, res) => {
+  try {
+    let movie;
+    
+    // Try to find by MongoDB _id first, then by tmdbId as fallback
+    if (mongoose.Types.ObjectId.isValid(req.params.id)) {
+      movie = await Movie.findById(req.params.id);
+    }
+    
+    if (!movie) {
+      const tmdbIdNum = parseInt(req.params.id);
+      if (!isNaN(tmdbIdNum)) {
+        movie = await Movie.findOne({ tmdbId: tmdbIdNum });
+      }
+    }
+    
+    if (!movie || !movie.tmdbId) {
+      return res.status(404).json({ message: 'Movie not found or missing TMDB ID' });
+    }
+
+    // Fetch images from TMDB
+    const axios = require('axios');
+    const tmdbApiKey = process.env.TMDB_API_KEY;
+    const response = await axios.get(
+      `https://api.themoviedb.org/3/movie/${movie.tmdbId}/images`,
+      {
+        params: {
+          api_key: tmdbApiKey
+        }
+      }
+    );
+
+    const images = response.data;
+    
+    // Extract and categorize images
+    const backdrops = (images.backdrops || []).map(img => ({
+      filePath: img.file_path,
+      aspectRatio: img.aspect_ratio,
+      height: img.height,
+      width: img.width,
+      voteAverage: img.vote_average,
+      voteCount: img.vote_count
+    }));
+
+    const posters = (images.posters || []).map(img => ({
+      filePath: img.file_path,
+      aspectRatio: img.aspect_ratio,
+      height: img.height,
+      width: img.width,
+      voteAverage: img.vote_average,
+      voteCount: img.vote_count
+    }));
+
+    res.json({
+      backdrops,
+      posters
+    });
+  } catch (error) {
+    console.error('Error fetching images:', error);
+    res.status(500).json({ message: 'Error fetching images', error: error.message });
+  }
+});
+
+// Get trailers/videos for a movie
+router.get('/:id/videos', async (req, res) => {
+  try {
+    let movie;
+    
+    // Try to find by MongoDB _id first, then by tmdbId as fallback
+    if (mongoose.Types.ObjectId.isValid(req.params.id)) {
+      movie = await Movie.findById(req.params.id);
+    }
+    
+    if (!movie) {
+      const tmdbIdNum = parseInt(req.params.id);
+      if (!isNaN(tmdbIdNum)) {
+        movie = await Movie.findOne({ tmdbId: tmdbIdNum });
+      }
+    }
+    
+    if (!movie || !movie.tmdbId) {
+      return res.status(404).json({ message: 'Movie not found or missing TMDB ID' });
+    }
+
+    // Fetch videos from TMDB
+    const axios = require('axios');
+    const tmdbApiKey = process.env.TMDB_API_KEY;
+    const response = await axios.get(
+      `https://api.themoviedb.org/3/movie/${movie.tmdbId}/videos`,
+      {
+        params: {
+          api_key: tmdbApiKey,
+          language: 'en-US'
+        }
+      }
+    );
+
+    const videos = response.data.results || [];
+    
+    // Filter and categorize videos
+    const trailers = videos.filter(v => v.type === 'Trailer' && v.site === 'YouTube');
+    const teasers = videos.filter(v => v.type === 'Teaser' && v.site === 'YouTube');
+    const clips = videos.filter(v => v.type === 'Clip' && v.site === 'YouTube');
+    const featurettes = videos.filter(v => v.type === 'Featurette' && v.site === 'YouTube');
+    const behindTheScenes = videos.filter(v => v.type === 'Behind the Scenes' && v.site === 'YouTube');
+
+    res.json({
+      trailers,
+      teasers,
+      clips,
+      featurettes,
+      behindTheScenes
+    });
+  } catch (error) {
+    console.error('Error fetching videos:', error);
+    res.status(500).json({ message: 'Error fetching videos', error: error.message });
+  }
+});
+
+// Get reviews for a movie
+router.get('/:id/reviews', async (req, res) => {
+  try {
+    const { page = 1, limit = 10, sortBy = 'recent' } = req.query;
+    const skip = (page - 1) * limit;
+
+    // Find the movie first to get its MongoDB _id
+    let movieId = req.params.id;
+    
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      const tmdbIdNum = parseInt(req.params.id);
+      if (!isNaN(tmdbIdNum)) {
+        const movie = await Movie.findOne({ tmdbId: tmdbIdNum });
+        if (movie) {
+          movieId = movie._id;
+        } else {
+          return res.status(404).json({ message: 'Movie not found' });
+        }
+      } else {
+        return res.status(400).json({ message: 'Invalid movie ID' });
+      }
+    }
+
+    // Get all watchlist items with reviews for this movie
+    let reviews = await Watchlist.find({
+      movie: movieId,
+      review: { $exists: true, $ne: '' }
+    })
+      .populate('user', 'username email createdAt')
+      .sort(sortBy === 'recent' ? { addedAt: -1 } : { rating: -1 })
+      .skip(parseInt(skip))
+      .limit(parseInt(limit));
+
+    const total = await Watchlist.countDocuments({
+      movie: movieId,
+      review: { $exists: true, $ne: '' }
+    });
+
+    // Get aggregated stats
+    const stats = await Watchlist.aggregate([
+      {
+        $match: {
+          movie: new mongoose.Types.ObjectId(movieId),
+          rating: { $exists: true, $ne: null }
+        }
+      },
+      {
+        $group: {
+          _id: null,
+          averageRating: { $avg: '$rating' },
+          totalRatings: { $sum: 1 },
+          ratingDistribution: {
+            $push: '$rating'
+          }
+        }
+      }
+    ]);
+
+    const ratingDistribution = { 5: 0, 4: 0, 3: 0, 2: 0, 1: 0 };
+    if (stats[0] && stats[0].ratingDistribution) {
+      stats[0].ratingDistribution.forEach(rating => {
+        if (rating >= 5) ratingDistribution[5]++;
+        else if (rating >= 4) ratingDistribution[4]++;
+        else if (rating >= 3) ratingDistribution[3]++;
+        else if (rating >= 2) ratingDistribution[2]++;
+        else ratingDistribution[1]++;
+      });
+    }
+
+    res.json({
+      reviews: reviews.map(item => ({
+        _id: item._id,
+        user: {
+          username: item.user.username,
+          createdAt: item.user.createdAt
+        },
+        rating: item.rating,
+        review: item.review,
+        addedAt: item.addedAt
+      })),
+      stats: {
+        totalReviews: total,
+        averageRating: stats[0]?.averageRating || 0,
+        ratingDistribution,
+        totalRatings: stats[0]?.totalRatings || 0
+      },
+      pagination: {
+        currentPage: parseInt(page),
+        totalPages: Math.ceil(total / limit),
+        total
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching reviews:', error);
+    res.status(500).json({ message: 'Error fetching reviews', error: error.message });
+  }
+});
+
+// Get watch providers list (must be before /:id route)
+router.get('/watch-providers', async (req, res) => {
+  try {
+    const providers = await tmdbService.getWatchProviders('movie');
+    // Filter to only show popular streaming services
+    const popularProviders = [
+      8,    // Netflix
+      9,    // Amazon Prime Video
+      337,  // Disney+
+      350,  // Apple TV+
+      531,  // Paramount+
+      283,  // Crunchyroll
+      384,  // HBO Max
+      521,  // Showtime
+      386,  // Starz
+      68,   // Microsoft Store
+      15,   // Hulu
+      1899  // Max
+    ];
+    
+    const filteredProviders = providers.results.filter(p => popularProviders.includes(p.provider_id));
+    res.json({ providers: filteredProviders });
+  } catch (error) {
+    console.error('Error fetching watch providers:', error);
+    res.status(500).json({ message: 'Error fetching watch providers' });
+  }
+});
+
 // Get movie by ID (must be last to avoid conflicts with specific routes)
 router.get('/:id', async (req, res) => {
   try {
+    // Validate that ID is provided and is a valid MongoDB ObjectId
+    if (!req.params.id || req.params.id === 'undefined') {
+      return res.status(400).json({ message: 'Invalid movie ID' });
+    }
+
+    // Check if the ID is a valid MongoDB ObjectId format
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({ message: 'Invalid movie ID format' });
+    }
+
     const movie = await Movie.findById(req.params.id)
       .populate('genres', 'name');
     

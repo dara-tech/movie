@@ -72,6 +72,23 @@ const movieSchema = new mongoose.Schema({
     type: Boolean,
     default: true
   },
+  watchProviders: {
+    flatrate: [{
+      providerId: Number,
+      providerName: String,
+      logoPath: String
+    }],
+    buy: [{
+      providerId: Number,
+      providerName: String,
+      logoPath: String
+    }],
+    rent: [{
+      providerId: Number,
+      providerName: String,
+      logoPath: String
+    }]
+  },
   createdAt: {
     type: Date,
     default: Date.now

@@ -10,9 +10,10 @@ import AdminStreamingManagement from './AdminStreamingManagement';
 import AdminSyncManagement from './AdminSyncManagement';
 import AdminSystemHealth from './AdminSystemHealth';
 import AutoSyncPanel from './AutoSyncPanel';
+import AdminActivity from './AdminActivity';
 import ComingSoon from './admin/ComingSoon';
 import { useAuth } from '../contexts/AuthContext';
-import { Shield, Users, Activity, Ban, BarChart3, Database, FileText, Lock, Key, Clock } from 'lucide-react';
+import { Shield, Users, Ban, BarChart3, Database, FileText, Lock, Key, Clock } from 'lucide-react';
 
 const AdminLayout: React.FC = () => {
   const { user, loading } = useAuth();
@@ -68,7 +69,7 @@ const AdminLayout: React.FC = () => {
             <Route path="/dashboard" element={<AdminDashboard />} />
             <Route path="/users" element={<AdminUserManagement />} />
             <Route path="/users/roles" element={<ComingSoon title="User Roles Management" description="Manage user roles and permissions" icon={<Users className="h-20 w-20 text-gray-400" />} />} />
-            <Route path="/users/activity" element={<ComingSoon title="User Activity" description="Track user activity and engagement" icon={<Activity className="h-20 w-20 text-gray-400" />} />} />
+            <Route path="/users/activity" element={<AdminActivity />} />
             <Route path="/users/banned" element={<ComingSoon title="Banned Users" description="Manage banned and restricted users" icon={<Ban className="h-20 w-20 text-gray-400" />} />} />
             <Route path="/content/movies" element={<AdminContentManagement contentType="movies" />} />
             <Route path="/content/tvshows" element={<AdminContentManagement contentType="tvshows" />} />
@@ -90,7 +91,7 @@ const AdminLayout: React.FC = () => {
             <Route path="/system/autosync" element={<AutoSyncPanel />} />
             <Route path="/security/access" element={<ComingSoon title="Access Control" description="Manage user access permissions" icon={<Lock className="h-20 w-20 text-gray-400" />} />} />
             <Route path="/security/apikeys" element={<ComingSoon title="API Keys" description="Manage API keys and tokens" icon={<Key className="h-20 w-20 text-gray-400" />} />} />
-            <Route path="/security/audit" element={<ComingSoon title="Audit Logs" description="Security and access audit trail" icon={<FileText className="h-20 w-20 text-gray-400" />} />} />
+            <Route path="/security/audit" element={<AdminActivity />} />
             <Route path="/security/sessions" element={<ComingSoon title="Active Sessions" description="Manage active user sessions" icon={<Clock className="h-20 w-20 text-gray-400" />} />} />
             <Route path="*" element={<div className="p-6 text-white text-center">Page Not Found</div>} />
           </Routes>

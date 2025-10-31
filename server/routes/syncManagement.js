@@ -14,7 +14,25 @@ router.get('/jobs', async (req, res) => {
     await syncService.initializeDefaultJobs();
     
     const syncJobs = await SyncJob.find().sort({ createdAt: 1 });
-    res.json(syncJobs);
+    
+    // Synchronize database status with in-memory running state
+    // If a job is marked as "running" in DB but not in memory, set it to "idle"
+    for (const job of syncJobs) {
+      const jobId = job._id.toString();
+      const isActuallyRunning = syncService.isJobRunning(jobId);
+      
+      if (job.status === 'running' && !isActuallyRunning) {
+        // Job is marked as running in DB but not actually running - fix it
+        await SyncJob.findByIdAndUpdate(jobId, { 
+          status: 'idle',
+          errorMessage: null
+        });
+      }
+    }
+    
+    // Re-fetch to get updated statuses
+    const updatedJobs = await SyncJob.find().sort({ createdAt: 1 });
+    res.json(updatedJobs);
   } catch (error) {
     console.error('Get sync jobs error:', error);
     res.status(500).json({ success: false, message: 'Failed to fetch sync jobs' });
@@ -83,6 +101,18 @@ router.post('/run-all', async (req, res) => {
   }
 });
 
+// POST /api/admin/sync/stop/:jobId - Stop a running sync job
+router.post('/stop/:jobId', async (req, res) => {
+  try {
+    const { jobId } = req.params;
+    const result = await syncService.stopJob(jobId);
+    res.json({ success: true, ...result });
+  } catch (error) {
+    console.error('Stop sync job error:', error);
+    res.status(400).json({ success: false, message: error.message || 'Failed to stop sync job' });
+  }
+});
+
 // PUT /api/admin/sync/jobs/:jobId - Update sync job configuration
 router.put('/jobs/:jobId', async (req, res) => {
   try {
@@ -111,6 +141,34 @@ router.put('/jobs/:jobId', async (req, res) => {
   } catch (error) {
     console.error('Update sync job error:', error);
     res.status(500).json({ success: false, message: 'Failed to update sync job' });
+  }
+});
+
+// GET /api/admin/sync/jobs/:jobId/logs - Get logs for a specific sync job
+// MUST be before /jobs/:jobId to avoid route conflicts
+router.get('/jobs/:jobId/logs', async (req, res) => {
+  try {
+    const { jobId } = req.params;
+    const job = await SyncJob.findById(jobId);
+    
+    if (!job) {
+      return res.status(404).json({ success: false, message: 'Sync job not found' });
+    }
+
+    // Return logs sorted by timestamp (newest first), limit to last 100
+    // Ensure logs exist and is an array
+    const logs = Array.isArray(job.logs) && job.logs.length > 0 
+      ? job.logs.slice(0, 100).sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
+      : [];
+
+    res.json({ 
+      success: true, 
+      logs: logs
+    });
+
+  } catch (error) {
+    console.error('Get sync job logs error:', error);
+    res.status(500).json({ success: false, message: 'Failed to fetch sync job logs' });
   }
 });
 
@@ -185,6 +243,25 @@ router.post('/resume/:jobId', async (req, res) => {
   } catch (error) {
     console.error('Resume sync job error:', error);
     res.status(500).json({ success: false, message: 'Failed to resume sync job' });
+  }
+});
+
+// POST /api/admin/sync/stop/:jobId - Stop a running sync job
+router.post('/stop/:jobId', async (req, res) => {
+  try {
+    const { jobId } = req.params;
+    
+    const result = await syncService.stopJob(jobId);
+
+    res.json({ 
+      success: true, 
+      message: 'Sync job stopped successfully',
+      ...result
+    });
+
+  } catch (error) {
+    console.error('Stop sync job error:', error);
+    res.status(500).json({ success: false, message: error.message || 'Failed to stop sync job' });
   }
 });
 

@@ -19,6 +19,7 @@ const autoSyncRoutes = require('./routes/autoSync');
 const adminRoutes = require('./routes/admin');
 const streamingRoutes = require('./routes/streaming');
 const syncManagementRoutes = require('./routes/syncManagement');
+const castRoutes = require('./routes/cast');
 
 // Connect to database
 connectDB();
@@ -87,6 +88,7 @@ app.use('/api/auto-sync', autoSyncRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/admin/streaming', streamingRoutes);
 app.use('/api/admin/sync', syncManagementRoutes);
+app.use('/api/cast', castRoutes);
 app.use('/api/search', require('./routes/search'));
 
 // Serve static files from React build

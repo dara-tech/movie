@@ -16,6 +16,7 @@ export interface SearchFilters {
   rating: string;
   sortBy: string;
   order: 'asc' | 'desc';
+  provider?: number | null;
 }
 
 interface Movie {
@@ -46,13 +47,14 @@ const MoviesPage: React.FC = () => {
   const [genres, setGenres] = useState<Genre[]>([]);
   const [searchQuery] = useState(searchParams.get('search') || '');
   const [selectedCategory, setSelectedCategory] = useState(searchParams.get('category') || '');
-  const [searchFilters] = useState<SearchFilters>({
+  const [searchFilters, setSearchFilters] = useState<SearchFilters>({
     query: searchParams.get('search') || '',
     genres: [],
     year: 'all',
     rating: 'all',
     sortBy: 'popularity',
-    order: 'desc'
+    order: 'desc',
+    provider: null
   });
   const [isSearching] = useState(false);
   const [movies] = useState<Movie[]>([]);
@@ -644,6 +646,7 @@ const MoviesPage: React.FC = () => {
             onPlay={handlePlayMovie}
             onAddToWatchlist={handleAddToWatchlist}
             watchlist={[]} // You might want to get this from context
+            onFilterChange={(newFilters) => setSearchFilters(prev => ({ ...prev, ...newFilters }))}
           />
         )}
 

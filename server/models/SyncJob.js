@@ -70,7 +70,22 @@ const syncJobSchema = new mongoose.Schema({
   config: {
     type: mongoose.Schema.Types.Mixed,
     default: {}
-  }
+  },
+  logs: [{
+    timestamp: {
+      type: Date,
+      default: Date.now
+    },
+    level: {
+      type: String,
+      enum: ['info', 'success', 'warning', 'error'],
+      default: 'info'
+    },
+    message: {
+      type: String,
+      required: true
+    }
+  }]
 }, {
   timestamps: true
 });

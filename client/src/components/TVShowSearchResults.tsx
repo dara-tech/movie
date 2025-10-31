@@ -2,8 +2,9 @@ import React, { useState, useEffect, useCallback } from 'react';
 import TVShowCard from './TvShowCard';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
-import { Loader2, Search, Filter, SortAsc, SortDesc } from 'lucide-react';
+import { Loader2, Search, Filter, Tv } from 'lucide-react';
 import api from '../services/api';
+import StreamingProviderFilter from './StreamingProviderFilter';
 
 interface TVShow {
   _id: string;
@@ -25,6 +26,12 @@ interface TVShow {
   type?: string;
 }
 
+interface WatchProvider {
+  provider_id: number;
+  provider_name: string;
+  logo_path: string;
+}
+
 interface TVShowSearchResultsProps {
   query: string;
   filters: {
@@ -35,11 +42,13 @@ interface TVShowSearchResultsProps {
     order: 'asc' | 'desc';
     status?: string;
     type?: string;
+    provider?: number | null;
   };
   onPlay: (tvShow: TVShow) => void;
   onAddToWatchlist: (tvShow: TVShow) => void;
   onRemoveFromWatchlist: (tvShow: TVShow) => void;
   watchlist: string[];
+  onFilterChange?: (newFilters: Partial<TVShowSearchResultsProps['filters']>) => void;
 }
 
 const TVShowSearchResults: React.FC<TVShowSearchResultsProps> = ({
@@ -48,7 +57,8 @@ const TVShowSearchResults: React.FC<TVShowSearchResultsProps> = ({
   onPlay,
   onAddToWatchlist,
   onRemoveFromWatchlist,
-  watchlist
+  watchlist,
+  onFilterChange
 }) => {
   const [tvShows, setTvShows] = useState<TVShow[]>([]);
   const [loading, setLoading] = useState(false);
@@ -57,6 +67,7 @@ const TVShowSearchResults: React.FC<TVShowSearchResultsProps> = ({
   const [totalPages, setTotalPages] = useState(1);
   const [totalResults, setTotalResults] = useState(0);
   const [hasMore, setHasMore] = useState(true);
+  const [providers, setProviders] = useState<WatchProvider[]>([]);
 
   const fetchResults = useCallback(async (page: number, append: boolean = false) => {
     setLoading(true);
@@ -86,6 +97,11 @@ const TVShowSearchResults: React.FC<TVShowSearchResultsProps> = ({
         params.append('type', filters.type);
       }
 
+      // Add provider filter
+      if (filters.provider) {
+        params.append('provider', filters.provider.toString());
+      }
+
       const response = await api.get(`/api/tvshows?${params}`);
       const data = response.data;
 
@@ -111,10 +127,30 @@ const TVShowSearchResults: React.FC<TVShowSearchResultsProps> = ({
     }
   }, [query, filters]);
 
+  // Fetch watch providers
+  useEffect(() => {
+    const fetchProviders = async () => {
+      try {
+        const response = await api.get('/api/tvshows/watch-providers');
+        setProviders(response.data.providers || []);
+      } catch (error) {
+        console.error('Failed to fetch watch providers:', error);
+      }
+    };
+    fetchProviders();
+  }, []);
+
   useEffect(() => {
     setCurrentPage(1);
     fetchResults(1, false);
   }, [query, filters, fetchResults]);
+
+  // Handle provider filter change
+  const handleProviderToggle = (providerId: number | null) => {
+    if (onFilterChange) {
+      onFilterChange({ provider: providerId });
+    }
+  };
 
   const handleLoadMore = () => {
     if (hasMore && !loading) {
@@ -126,17 +162,34 @@ const TVShowSearchResults: React.FC<TVShowSearchResultsProps> = ({
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div className="flex items-center gap-3">
-          <h2 className="text-2xl font-bold text-white bg-gradient-to-r from-white to-gray-300 bg-clip-text text-transparent">
-            Search results for "{query}"
-          </h2>
-          <div className="w-12 h-0.5 bg-gradient-to-r from-red-600 to-red-400 rounded-full"></div>
+      <div className="space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <h2 className="text-2xl font-bold text-white bg-gradient-to-r from-white to-gray-300 bg-clip-text text-transparent">
+              Search results for "{query}"
+            </h2>
+            <div className="w-12 h-0.5 bg-gradient-to-r from-red-600 to-red-400 rounded-full"></div>
+          </div>
+          {totalResults > 0 && (
+            <Badge variant="secondary" className="bg-gray-800/50 text-gray-300 border-gray-700/50 text-sm px-3 py-1">
+              {totalResults} results found
+            </Badge>
+          )}
         </div>
-        {totalResults > 0 && (
-          <Badge variant="secondary" className="bg-gray-800/50 text-gray-300 border-gray-700/50 text-sm px-3 py-1">
-            {totalResults} results found
-          </Badge>
+
+        {/* Streaming Provider Filter */}
+        {providers.length > 0 && (
+          <div className="space-y-2">
+            <div className="flex items-center gap-2 text-sm text-gray-400">
+              <Tv className="h-4 w-4" />
+              <span>Streaming Service</span>
+            </div>
+            <StreamingProviderFilter
+              providers={providers}
+              selectedProvider={filters.provider || null}
+              onProviderToggle={handleProviderToggle}
+            />
+          </div>
         )}
       </div>
 

@@ -5,7 +5,7 @@ import { useToast } from '../contexts/ToastContext';
 import api from '../services/api';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
-import { Play, Star, Clock, TrendingUp, Heart, History } from 'lucide-react';
+import { Play, Star, Clock, TrendingUp, Heart, History, Sparkles } from 'lucide-react';
 import MovieGrid from './MovieGrid';
 import MoviePlayer from './MoviePlayer';
 
@@ -33,30 +33,31 @@ interface DashboardStats {
   recentMovies: Movie[];
   popularMovies: Movie[];
   trendingMovies: Movie[];
+  recommendedMovies: Movie[];
 }
 
 const SkeletonCard: React.FC = () => (
-  <Card className="bg-gradient-to-br from-gray-900/80 to-gray-800/80 backdrop-blur-sm border border-gray-700/50 shadow-xl">
+  <Card className="bg-black border border-gray-800/50 rounded-none">
     <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
       <div className="flex items-center gap-2">
-        <div className="w-1 h-4 bg-gray-600 rounded-full animate-pulse"></div>
-        <div className="h-4 w-20 bg-gray-600 rounded animate-pulse"></div>
+        <div className="w-1 h-4 bg-gray-900 animate-pulse"></div>
+        <div className="h-4 w-20 bg-gray-900 animate-pulse"></div>
       </div>
-      <div className="h-4 w-4 bg-gray-600 rounded animate-pulse"></div>
+      <div className="h-4 w-4 bg-gray-900 animate-pulse"></div>
     </CardHeader>
     <CardContent>
-      <div className="h-8 w-12 bg-gray-600 rounded animate-pulse mb-1"></div>
-      <div className="h-3 w-16 bg-gray-600 rounded animate-pulse"></div>
+      <div className="h-8 w-12 bg-gray-900 animate-pulse mb-1"></div>
+      <div className="h-3 w-16 bg-gray-900 animate-pulse"></div>
     </CardContent>
   </Card>
 );
 
 const SkeletonQuickAction: React.FC = () => (
-  <Card className="bg-gradient-to-br from-gray-900/80 to-gray-800/80 backdrop-blur-sm border border-gray-700/50">
+  <Card className="bg-black border border-gray-800/50 rounded-none">
     <CardHeader className="p-6">
-      <div className="w-16 h-16 rounded-xl bg-gray-600 animate-pulse mb-4"></div>
-      <div className="h-5 w-24 bg-gray-600 rounded animate-pulse mb-2"></div>
-      <div className="h-4 w-32 bg-gray-600 rounded animate-pulse"></div>
+      <div className="w-16 h-16 bg-gray-900 animate-pulse mb-4"></div>
+      <div className="h-5 w-24 bg-gray-900 animate-pulse mb-2"></div>
+      <div className="h-4 w-32 bg-gray-900 animate-pulse"></div>
     </CardHeader>
   </Card>
 );
@@ -88,6 +89,7 @@ const Dashboard: React.FC = () => {
     recentMovies: [],
     popularMovies: [],
     trendingMovies: [],
+    recommendedMovies: [],
   });
   const [loading, setLoading] = useState(true);
   const [selectedMovie, setSelectedMovie] = useState<Movie | null>(null);
@@ -115,16 +117,19 @@ const Dashboard: React.FC = () => {
 
       let watchlistStats = null;
       let recentMovies = [];
+      let recommendedMovies = [];
 
       // Only fetch user-specific data if logged in
       if (user) {
         try {
-          const [watchlistResponse, historyResponse] = await Promise.all([
+          const [watchlistResponse, historyResponse, recommendationsResponse] = await Promise.all([
             api.get('/api/watchlist/stats'),
-            api.get('/api/history/recent?limit=6')
+            api.get('/api/history/recent?limit=6'),
+            api.get('/api/movies/recommendations?limit=6').catch(() => ({ data: { movies: [] } }))
           ]);
           watchlistStats = watchlistResponse.data;
           recentMovies = historyResponse.data.map((item: any) => item.movie);
+          recommendedMovies = recommendationsResponse.data.movies || [];
         } catch (authError) {
           console.log('User not authenticated, skipping personal data');
         }
@@ -135,6 +140,7 @@ const Dashboard: React.FC = () => {
         recentMovies: recentMovies,
         popularMovies: popularMovies.data.movies || [],
         trendingMovies: trendingMovies.data.movies || [],
+        recommendedMovies: recommendedMovies,
       };
       
       console.log('Dashboard: Setting stats:', newStats);
@@ -203,7 +209,7 @@ const Dashboard: React.FC = () => {
   if (loading) {
     return (
       <div className="min-h-screen bg-black">
-        <div className="container mx-auto p-6 space-y-8">
+        <div className=" p-6 space-y-8">
           {/* Header Skeleton */}
           <div className="space-y-6">
             <div className="flex items-center justify-between">
@@ -257,7 +263,7 @@ const Dashboard: React.FC = () => {
         <div className="space-y-6">
           <div className="flex items-center justify-between">
             <div>
-              <h1 className="text-4xl md:text-5xl font-bold text-white bg-gradient-to-r from-white to-gray-300 bg-clip-text text-transparent">
+              <h1 className="text-4xl md:text-5xl font-bold text-white uppercase tracking-wider">
                 {user ? `Welcome back, ${user.username}!` : 'Welcome to MovieStream!'}
               </h1>
               <p className="text-gray-400 text-lg mt-2">
@@ -265,71 +271,71 @@ const Dashboard: React.FC = () => {
               </p>
             </div>
             <div className="flex items-center gap-2 text-white/80">
-              <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-              <span className="text-sm">Live streaming available</span>
+              <div className="w-2 h-2 bg-green-600"></div>
+              <span className="text-sm uppercase tracking-wide">Live streaming available</span>
             </div>
           </div>
-          <div className="w-24 h-1 bg-gradient-to-r from-red-600 to-red-400 rounded-full"></div>
+          <div className="w-24 h-1 bg-red-600"></div>
         </div>
 
         {/* Advanced Stats Cards - Only show if user is logged in */}
         {user && stats.watchlist && (
           <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
-            <Card className="bg-gradient-to-br from-gray-900/80 to-gray-800/80 backdrop-blur-sm border border-gray-700/50 shadow-xl">
+            <Card className="bg-black border border-blue-700/30 hover:border-blue-600/50 transition-all duration-300 rounded-none">
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
-                <CardTitle className="text-sm font-medium text-white flex items-center gap-2">
-                  <div className="w-1 h-4 bg-gradient-to-b from-blue-500 to-blue-400 rounded-full"></div>
+                <CardTitle className="text-sm font-bold text-white flex items-center gap-2 uppercase tracking-wide">
+                  <div className="w-1 h-4 bg-blue-600"></div>
                   Want to Watch
                 </CardTitle>
-                <Clock className="h-4 w-4 text-blue-400" />
+                <Clock className="h-4 w-4 text-blue-600" />
               </CardHeader>
               <CardContent>
                 <div className="text-3xl font-bold text-white mb-1">{stats.watchlist.want_to_watch}</div>
-                <p className="text-xs text-gray-400">Movies in queue</p>
+                <p className="text-xs text-gray-500 uppercase tracking-wider">Movies in queue</p>
               </CardContent>
             </Card>
 
-            <Card className="bg-gradient-to-br from-gray-900/80 to-gray-800/80 backdrop-blur-sm border border-gray-700/50 shadow-xl">
+            <Card className="bg-black border border-red-700/30 hover:border-red-600/50 transition-all duration-300 rounded-none">
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
-                <CardTitle className="text-sm font-medium text-white flex items-center gap-2">
-                  <div className="w-1 h-4 bg-gradient-to-b from-red-500 to-red-400 rounded-full"></div>
+                <CardTitle className="text-sm font-bold text-white flex items-center gap-2 uppercase tracking-wide">
+                  <div className="w-1 h-4 bg-red-600"></div>
                   Currently Watching
                 </CardTitle>
-                <Play className="h-4 w-4 text-red-400" />
+                <Play className="h-4 w-4 text-red-600" />
               </CardHeader>
               <CardContent>
                 <div className="text-3xl font-bold text-white mb-1">{stats.watchlist.watching}</div>
-                <p className="text-xs text-gray-400">In progress</p>
+                <p className="text-xs text-gray-500 uppercase tracking-wider">In progress</p>
               </CardContent>
             </Card>
 
-            <Card className="bg-gradient-to-br from-gray-900/80 to-gray-800/80 backdrop-blur-sm border border-gray-700/50 shadow-xl">
+            <Card className="bg-black border border-green-700/30 hover:border-green-600/50 transition-all duration-300 rounded-none">
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
-                <CardTitle className="text-sm font-medium text-white flex items-center gap-2">
-                  <div className="w-1 h-4 bg-gradient-to-b from-green-500 to-green-400 rounded-full"></div>
+                <CardTitle className="text-sm font-bold text-white flex items-center gap-2 uppercase tracking-wide">
+                  <div className="w-1 h-4 bg-green-600"></div>
                   Watched
                 </CardTitle>
-                <Star className="h-4 w-4 text-green-400" />
+                <Star className="h-4 w-4 text-green-600" />
               </CardHeader>
               <CardContent>
                 <div className="text-3xl font-bold text-white mb-1">{stats.watchlist.watched}</div>
-                <p className="text-xs text-gray-400">Completed movies</p>
+                <p className="text-xs text-gray-500 uppercase tracking-wider">Completed movies</p>
               </CardContent>
             </Card>
 
-            <Card className="bg-gradient-to-br from-gray-900/80 to-gray-800/80 backdrop-blur-sm border border-gray-700/50 shadow-xl">
+            <Card className="bg-black border border-purple-700/30 hover:border-purple-600/50 transition-all duration-300 rounded-none">
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
-                <CardTitle className="text-sm font-medium text-white flex items-center gap-2">
-                  <div className="w-1 h-4 bg-gradient-to-b from-purple-500 to-purple-400 rounded-full"></div>
+                <CardTitle className="text-sm font-bold text-white flex items-center gap-2 uppercase tracking-wide">
+                  <div className="w-1 h-4 bg-purple-600"></div>
                   Total Movies
                 </CardTitle>
-                <TrendingUp className="h-4 w-4 text-purple-400" />
+                <TrendingUp className="h-4 w-4 text-purple-600" />
               </CardHeader>
               <CardContent>
                 <div className="text-3xl font-bold text-white mb-1">
                   {stats.watchlist.want_to_watch + stats.watchlist.watching + stats.watchlist.watched}
                 </div>
-                <p className="text-xs text-gray-400">In your collection</p>
+                <p className="text-xs text-gray-500 uppercase tracking-wider">In your collection</p>
               </CardContent>
             </Card>
           </div>
@@ -338,22 +344,22 @@ const Dashboard: React.FC = () => {
         {/* Advanced Quick Actions */}
         <div className="space-y-6">
           <div className="flex items-center gap-2">
-            <h2 className="text-2xl font-bold text-white bg-gradient-to-r from-white to-gray-300 bg-clip-text text-transparent">Quick Actions</h2>
-            <div className="w-16 h-0.5 bg-gradient-to-r from-red-600 to-red-400 rounded-full"></div>
+            <h2 className="text-2xl font-bold text-white uppercase tracking-wider">Quick Actions</h2>
+            <div className="w-16 h-0.5 bg-red-600"></div>
           </div>
           <div className="grid gap-6 md:grid-cols-3">
             {quickActions.map((action, index) => (
               <Card
                 key={index}
-                className="cursor-pointer hover:shadow-xl transition-all duration-300 bg-gradient-to-br from-gray-900/80 to-gray-800/80 backdrop-blur-sm border border-gray-700/50 hover:border-gray-600/50 hover:scale-105 group"
+                className="cursor-pointer transition-all duration-200 bg-black border border-gray-800/50 hover:border-gray-700/50 rounded-none group"
                 onClick={action.onClick}
               >
                 <CardHeader className="p-6">
-                  <div className={`w-16 h-16 rounded-xl ${action.color} flex items-center justify-center text-white mb-4 shadow-lg group-hover:scale-110 transition-transform duration-300`}>
+                  <div className={`w-16 h-16 ${action.color} flex items-center justify-center text-white mb-4 transition-transform duration-200`}>
                     {action.icon}
                   </div>
-                  <CardTitle className="text-white text-lg group-hover:text-gray-200 transition-colors">{action.title}</CardTitle>
-                  <CardDescription className="text-gray-400 group-hover:text-gray-300 transition-colors">{action.description}</CardDescription>
+                  <CardTitle className="text-white text-lg uppercase tracking-wide">{action.title}</CardTitle>
+                  <CardDescription className="text-gray-500 uppercase tracking-wide">{action.description}</CardDescription>
                 </CardHeader>
               </Card>
             ))}
@@ -362,17 +368,36 @@ const Dashboard: React.FC = () => {
 
         {/* Advanced Movie Sections */}
         <div className="space-y-10">
+          {/* Recommended Movies */}
+          {stats.recommendedMovies.length > 0 && user && (
+            <div className="space-y-6">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <Sparkles className="h-6 w-6 text-yellow-600" />
+                  <h2 className="text-2xl font-bold text-white uppercase tracking-wider">Recommended For You</h2>
+                  <div className="w-12 h-0.5 bg-yellow-600"></div>
+                </div>
+              </div>
+              <MovieGrid
+                movies={stats.recommendedMovies}
+                onPlay={handlePlayMovie}
+                onAddToWatchlist={handleAddToWatchlist}
+                loading={loading}
+              />
+            </div>
+          )}
+
           {/* Trending Movies */}
           <div className="space-y-6">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
-                <h2 className="text-2xl font-bold text-white bg-gradient-to-r from-white to-gray-300 bg-clip-text text-transparent">Trending Now</h2>
-                <div className="w-12 h-0.5 bg-gradient-to-r from-red-600 to-red-400 rounded-full"></div>
+                <h2 className="text-2xl font-bold text-white uppercase tracking-wider">Trending Now</h2>
+                <div className="w-12 h-0.5 bg-red-600"></div>
               </div>
               <Button 
                 variant="outline" 
                 onClick={() => navigate('/movies?filter=trending')}
-                className="bg-gradient-to-r from-gray-800 to-gray-700 border-gray-600/50 text-white hover:from-gray-700 hover:to-gray-600 transition-all duration-200 hover:scale-105"
+                className="bg-black border border-gray-700 text-white hover:bg-gray-900 transition-all duration-200 rounded-none"
               >
                 View All
               </Button>
@@ -389,13 +414,13 @@ const Dashboard: React.FC = () => {
           <div className="space-y-6">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
-                <h2 className="text-2xl font-bold text-white bg-gradient-to-r from-white to-gray-300 bg-clip-text text-transparent">Popular Movies</h2>
-                <div className="w-12 h-0.5 bg-gradient-to-r from-red-600 to-red-400 rounded-full"></div>
+                <h2 className="text-2xl font-bold text-white uppercase tracking-wider">Popular Movies</h2>
+                <div className="w-12 h-0.5 bg-red-600"></div>
               </div>
               <Button 
                 variant="outline" 
                 onClick={() => navigate('/movies?filter=popular')}
-                className="bg-gradient-to-r from-gray-800 to-gray-700 border-gray-600/50 text-white hover:from-gray-700 hover:to-gray-600 transition-all duration-200 hover:scale-105"
+                className="bg-black border border-gray-700 text-white hover:bg-gray-900 transition-all duration-200 rounded-none"
               >
                 View All
               </Button>
@@ -413,13 +438,13 @@ const Dashboard: React.FC = () => {
             <div className="space-y-6">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
-                  <h2 className="text-2xl font-bold text-white bg-gradient-to-r from-white to-gray-300 bg-clip-text text-transparent">Recently Watched</h2>
-                  <div className="w-12 h-0.5 bg-gradient-to-r from-red-600 to-red-400 rounded-full"></div>
+                  <h2 className="text-2xl font-bold text-white uppercase tracking-wider">Recently Watched</h2>
+                  <div className="w-12 h-0.5 bg-red-600"></div>
                 </div>
                 <Button 
                   variant="outline" 
                   onClick={() => navigate('/history')}
-                  className="bg-gradient-to-r from-gray-800 to-gray-700 border-gray-600/50 text-white hover:from-gray-700 hover:to-gray-600 transition-all duration-200 hover:scale-105"
+                  className="bg-black border border-gray-700 text-white hover:bg-gray-900 transition-all duration-200 rounded-none"
                 >
                   View All
                 </Button>

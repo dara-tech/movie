@@ -19,10 +19,19 @@ import {
   Pause,
   Settings,
   Download,
+  Square,
+  FileText,
+  X,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Switch } from '@/components/ui/switch';
+
+interface SyncLog {
+  timestamp: string;
+  level: 'info' | 'success' | 'warning' | 'error';
+  message: string;
+}
 
 interface SyncJob {
   _id?: string;
@@ -43,6 +52,7 @@ interface SyncJob {
   successCount?: number;
   failureCount?: number;
   config?: any;
+  logs?: SyncLog[];
 }
 
 // Helper function to get job ID
@@ -76,7 +86,10 @@ const AdminSyncManagement: React.FC = () => {
   
   // Modal states
   const [configModalOpen, setConfigModalOpen] = useState(false);
+  const [logsModalOpen, setLogsModalOpen] = useState(false);
   const [selectedJob, setSelectedJob] = useState<SyncJob | null>(null);
+  const [selectedJobLogs, setSelectedJobLogs] = useState<SyncLog[]>([]);
+  const [logsLoading, setLogsLoading] = useState(false);
   const [autoSyncEnabled, setAutoSyncEnabled] = useState(false);
 
   const fetchSyncData = useCallback(async () => {
@@ -103,6 +116,13 @@ const AdminSyncManagement: React.FC = () => {
   useEffect(() => {
     if (user && ['admin', 'super_admin'].includes(user.role)) {
       fetchSyncData();
+      
+      // Auto-refresh every 3 seconds to show real-time status
+      const interval = setInterval(() => {
+        fetchSyncData();
+      }, 3000);
+      
+      return () => clearInterval(interval);
     }
   }, [user, fetchSyncData]);
 
@@ -163,6 +183,32 @@ const AdminSyncManagement: React.FC = () => {
     }
   };
 
+  const stopSyncJob = async (jobId: string) => {
+    try {
+      setRunningJobs(prev => new Set(prev).add(jobId));
+      setError(null);
+      setSyncMessage(`Stopping sync job...`);
+
+      await api.post(`/api/admin/sync/stop/${jobId}`);
+      
+      setSyncMessage(`Sync job stopped successfully`);
+      setTimeout(() => setSyncMessage(null), 3000);
+      
+      // Refresh data
+      await fetchSyncData();
+
+    } catch (err: any) {
+      console.error('Failed to stop sync job:', err);
+      setError(err.response?.data?.message || 'Failed to stop sync job');
+    } finally {
+      setRunningJobs(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(jobId);
+        return newSet;
+      });
+    }
+  };
+
   const updateJobConfig = async () => {
     if (!selectedJob) return;
 
@@ -189,6 +235,58 @@ const AdminSyncManagement: React.FC = () => {
     setSelectedJob(job);
     setAutoSyncEnabled(job.isEnabled);
     setConfigModalOpen(true);
+  };
+
+  const handleViewLogs = async (job: SyncJob) => {
+    setSelectedJob(job);
+    setLogsModalOpen(true);
+    setLogsLoading(true);
+    setSelectedJobLogs([]);
+
+    try {
+      const jobId = getJobId(job);
+      const response = await api.get(`/api/admin/sync/jobs/${jobId}/logs`);
+      setSelectedJobLogs(response.data.logs || []);
+      
+      // Auto-refresh logs if job is running
+      if (job.status === 'running' || runningJobs.has(jobId)) {
+        const intervalId = setInterval(async () => {
+          try {
+            const refreshResponse = await api.get(`/api/admin/sync/jobs/${jobId}/logs`);
+            setSelectedJobLogs(refreshResponse.data.logs || []);
+          } catch (err) {
+            console.error('Failed to refresh logs:', err);
+          }
+        }, 3000); // Refresh every 3 seconds
+        
+        // Clean up interval when modal closes
+        const cleanup = () => {
+          clearInterval(intervalId);
+          setLogsModalOpen(false);
+        };
+        
+        // Store cleanup function
+        (window as any).logsCleanup = cleanup;
+      }
+    } catch (err: any) {
+      console.error('Failed to fetch logs:', err);
+      setError(err.response?.data?.message || 'Failed to fetch logs');
+    } finally {
+      setLogsLoading(false);
+    }
+  };
+
+  const getLogLevelColor = (level: string) => {
+    switch (level) {
+      case 'success':
+        return 'text-green-400';
+      case 'warning':
+        return 'text-yellow-400';
+      case 'error':
+        return 'text-red-400';
+      default:
+        return 'text-gray-300';
+    }
   };
 
   const getStatusIcon = (job: SyncJob) => {
@@ -414,19 +512,27 @@ const AdminSyncManagement: React.FC = () => {
                         </div>
                         
                         <div className="flex items-center space-x-2">
-                          <Button
-                            onClick={() => runSyncJob(getJobId(job))}
-                            disabled={runningJobs.has(getJobId(job)) || !job.isEnabled}
-                            size="sm"
-                            variant="default"
-                            className="border-gray-600 text-gray-300 hover:bg-gray-700 h-8 w-8 p-0"
-                          >
-                            {runningJobs.has(getJobId(job)) ? (
-                              <Loader2 className="h-3 w-3 animate-spin" />
-                            ) : (
+                          {job.status === 'running' || runningJobs.has(getJobId(job)) ? (
+                            <Button
+                              onClick={() => stopSyncJob(getJobId(job))}
+                              disabled={!runningJobs.has(getJobId(job))}
+                              size="sm"
+                              variant="default"
+                              className="border-gray-600 text-gray-300 hover:bg-red-700 h-8 w-8 p-0"
+                            >
+                              <Square className="h-3 w-3" />
+                            </Button>
+                          ) : (
+                            <Button
+                              onClick={() => runSyncJob(getJobId(job))}
+                              disabled={!job.isEnabled}
+                              size="sm"
+                              variant="default"
+                              className="border-gray-600 text-gray-300 hover:bg-gray-700 h-8 w-8 p-0"
+                            >
                               <Play className="h-3 w-3" />
-                            )}
-                          </Button>
+                            </Button>
+                          )}
 
                           <Button
                             onClick={() => handleConfigClick(job)}
@@ -435,6 +541,15 @@ const AdminSyncManagement: React.FC = () => {
                             className="border-gray-600 text-gray-300 hover:bg-gray-700 h-8 w-8 p-0"
                           >
                             <Settings className="h-3 w-3" />
+                          </Button>
+                          <Button
+                            onClick={() => handleViewLogs(job)}
+                            size="sm"
+                            variant="default"
+                            className="border-gray-600 text-gray-300 hover:bg-gray-700 h-8 w-8 p-0"
+                            title="View Logs"
+                          >
+                            <FileText className="h-3 w-3" />
                           </Button>
                         </div>
                       </div>
@@ -494,19 +609,27 @@ const AdminSyncManagement: React.FC = () => {
                             />
                           </div>
                           
-                          <Button
-                            onClick={() => runSyncJob(getJobId(job))}
-                            disabled={runningJobs.has(getJobId(job)) || !job.isEnabled}
-                            size="sm"
-                            variant="default"
-                            className="border-gray-600 text-gray-300 hover:bg-gray-700"
-                          >
-                            {runningJobs.has(getJobId(job)) ? (
-                              <Loader2 className="h-4 w-4 animate-spin" />
-                            ) : (
+                          {job.status === 'running' || runningJobs.has(getJobId(job)) ? (
+                            <Button
+                              onClick={() => stopSyncJob(getJobId(job))}
+                              disabled={!runningJobs.has(getJobId(job))}
+                              size="sm"
+                              variant="default"
+                              className="border-gray-600 text-gray-300 hover:bg-red-700"
+                            >
+                              <Square className="h-4 w-4" />
+                            </Button>
+                          ) : (
+                            <Button
+                              onClick={() => runSyncJob(getJobId(job))}
+                              disabled={!job.isEnabled}
+                              size="sm"
+                              variant="default"
+                              className="border-gray-600 text-gray-300 hover:bg-gray-700"
+                            >
                               <Play className="h-4 w-4" />
-                            )}
-                          </Button>
+                            </Button>
+                          )}
 
                           <Button
                             onClick={() => handleConfigClick(job)}
@@ -515,6 +638,15 @@ const AdminSyncManagement: React.FC = () => {
                             className="border-gray-600 text-gray-300 hover:bg-gray-700"
                           >
                             <Settings className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            onClick={() => handleViewLogs(job)}
+                            size="sm"
+                            variant="default"
+                            className="border-gray-600 text-gray-300 hover:bg-gray-700"
+                            title="View Logs"
+                          >
+                            <FileText className="h-4 w-4" />
                           </Button>
                         </div>
                       </div>
@@ -580,6 +712,72 @@ const AdminSyncManagement: React.FC = () => {
               >
                 Save Configuration
               </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Logs Modal */}
+        <Dialog open={logsModalOpen} onOpenChange={(open) => {
+          setLogsModalOpen(open);
+          if (!open && (window as any).logsCleanup) {
+            (window as any).logsCleanup();
+            delete (window as any).logsCleanup;
+          }
+        }}>
+          <DialogContent className="bg-gray-950 border-gray-800 text-white max-w-4xl mx-auto max-h-[80vh] flex flex-col">
+            <DialogHeader>
+              <div className="flex items-center justify-between">
+                <div>
+                  <DialogTitle className="text-white text-lg sm:text-xl">Sync Logs</DialogTitle>
+                  <DialogDescription className="text-gray-300 text-sm sm:text-base">
+                    {selectedJob?.name} - Activity Logs
+                    {(selectedJob?.status === 'running' || runningJobs.has(getJobId(selectedJob || {} as SyncJob))) && (
+                      <span className="ml-2 text-green-400">● Live</span>
+                    )}
+                  </DialogDescription>
+                </div>
+             
+              </div>
+            </DialogHeader>
+            
+            <div className="flex-1 overflow-y-auto mt-4">
+              {logsLoading ? (
+                <div className="flex items-center justify-center py-12">
+                  <Loader2 className="h-6 w-6 animate-spin text-blue-400" />
+                  <span className="ml-3 text-gray-400">Loading logs...</span>
+                </div>
+              ) : selectedJobLogs.length === 0 ? (
+                <div className="text-center py-12">
+                  <FileText className="h-12 w-12 text-gray-600 mx-auto mb-4" />
+                  <p className="text-gray-400">No logs available for this sync job</p>
+                </div>
+              ) : (
+                <div className="bg-black rounded-none p-4 space-y-2 font-mono text-sm max-h-[60vh] overflow-y-auto">
+                  {selectedJobLogs.map((log, index) => (
+                    <div key={index} className="flex items-start gap-3 pb-2 border-b border-gray-800 last:border-0">
+                      <span className="text-gray-500 text-xs whitespace-nowrap mt-1">
+                        {new Date(log.timestamp).toLocaleTimeString()}
+                      </span>
+                      <span className={`font-semibold uppercase text-xs ${getLogLevelColor(log.level)}`}>
+                        [{log.level}]
+                      </span>
+                      <span className={`flex-1 ${getLogLevelColor(log.level)}`}>
+                        {log.message}
+                      </span>
+                    </div>
+                  ))}
+                  {(selectedJob?.status === 'running' || runningJobs.has(getJobId(selectedJob || {} as SyncJob))) && (
+                    <div className="flex items-center justify-center py-2">
+                      <Loader2 className="h-4 w-4 animate-spin text-blue-400 mr-2" />
+                      <span className="text-xs text-gray-400">Live updates...</span>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <DialogFooter>
+          
             </DialogFooter>
           </DialogContent>
         </Dialog>

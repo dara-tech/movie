@@ -137,6 +137,8 @@ router.get('/', async (req, res) => {
 
     const searchRegex = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
     
+    const { provider } = req.query;
+    
     const movieQuery = {
       $or: [
         { title: searchRegex },
@@ -154,6 +156,22 @@ router.get('/', async (req, res) => {
       ],
       isAvailable: true
     };
+
+    // Add provider filter if provided
+    if (provider) {
+      const providerId = parseInt(provider);
+      if (!isNaN(providerId)) {
+        const providerFilter = {
+          $or: [
+            { 'watchProviders.flatrate.providerId': providerId },
+            { 'watchProviders.buy.providerId': providerId },
+            { 'watchProviders.rent.providerId': providerId }
+          ]
+        };
+        Object.assign(movieQuery, providerFilter);
+        Object.assign(tvShowQuery, providerFilter);
+      }
+    }
 
     const sortOptions = {};
     sortOptions[sortBy] = order === 'desc' ? -1 : 1;

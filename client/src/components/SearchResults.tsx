@@ -2,8 +2,9 @@ import React, { useState, useEffect, useCallback } from 'react';
 import MovieCard from './MovieCard';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
-import { Loader2, Search, Filter, SortAsc, SortDesc, Image } from 'lucide-react';
+import { Loader2, Search, Filter, SortAsc, SortDesc, Image, Tv } from 'lucide-react';
 import api from '../services/api';
+import StreamingProviderFilter from './StreamingProviderFilter';
 
 interface Movie {
   _id: string;
@@ -18,6 +19,12 @@ interface Movie {
   vidsrcUrl?: string;
 }
 
+interface WatchProvider {
+  provider_id: number;
+  provider_name: string;
+  logo_path: string;
+}
+
 interface SearchResultsProps {
   query: string;
   filters: {
@@ -26,10 +33,12 @@ interface SearchResultsProps {
     rating: string;
     sortBy: string;
     order: 'asc' | 'desc';
+    provider?: number | null;
   };
   onPlay: (movie: Movie) => void;
   onAddToWatchlist: (movie: Movie) => void;
   watchlist: string[];
+  onFilterChange?: (newFilters: Partial<SearchResultsProps['filters']>) => void;
 }
 
 const SearchResults: React.FC<SearchResultsProps> = ({
@@ -37,7 +46,8 @@ const SearchResults: React.FC<SearchResultsProps> = ({
   filters,
   onPlay,
   onAddToWatchlist,
-  watchlist
+  watchlist,
+  onFilterChange
 }) => {
   const [movies, setMovies] = useState<Movie[]>([]);
   const [loading, setLoading] = useState(false);
@@ -48,6 +58,7 @@ const SearchResults: React.FC<SearchResultsProps> = ({
   const [totalResults, setTotalResults] = useState(0);
   const [hasMore, setHasMore] = useState(false);
   const [showImageSearch, setShowImageSearch] = useState(false);
+  const [providers, setProviders] = useState<WatchProvider[]>([]);
 
   // Debounced search function
   const searchMovies = useCallback(async (searchQuery: string, searchFilters: typeof filters, page: number = 1, append: boolean = false) => {
@@ -84,6 +95,11 @@ const SearchResults: React.FC<SearchResultsProps> = ({
       // Add rating filter
       if (searchFilters.rating !== 'all') {
         params.append('minRating', searchFilters.rating);
+      }
+
+      // Add provider filter
+      if (searchFilters.provider) {
+        params.append('provider', searchFilters.provider.toString());
       }
 
       const response = await api.get(`/api/movies?${params}`);
@@ -130,13 +146,37 @@ const SearchResults: React.FC<SearchResultsProps> = ({
     }
   };
 
+  // Fetch watch providers
+  useEffect(() => {
+    const fetchProviders = async () => {
+      try {
+        const response = await api.get('/api/movies/watch-providers');
+        setProviders(response.data.providers || []);
+      } catch (error) {
+        console.error('Failed to fetch watch providers:', error);
+      }
+    };
+    fetchProviders();
+  }, []);
+
   // Get filter summary
   const getFilterSummary = () => {
     const parts = [];
     if (filters.genres.length > 0) parts.push(`${filters.genres.length} genre${filters.genres.length > 1 ? 's' : ''}`);
     if (filters.year !== 'all') parts.push(filters.year);
     if (filters.rating !== 'all') parts.push(`${filters.rating}+ stars`);
+    if (filters.provider) {
+      const providerName = providers.find(p => p.provider_id === filters.provider)?.provider_name || 'streaming service';
+      parts.push(providerName);
+    }
     return parts.length > 0 ? ` • ${parts.join(' • ')}` : '';
+  };
+
+  // Handle provider filter change
+  const handleProviderToggle = (providerId: number | null) => {
+    if (onFilterChange) {
+      onFilterChange({ provider: providerId });
+    }
   };
 
   if (!query.trim()) {
@@ -176,6 +216,21 @@ const SearchResults: React.FC<SearchResultsProps> = ({
             ) : (
               <SortDesc className="h-4 w-4" />
             )}
+          </div>
+        )}
+
+        {/* Streaming Provider Filter */}
+        {providers.length > 0 && (
+          <div className="space-y-2">
+            <div className="flex items-center gap-2 text-sm text-gray-400">
+              <Tv className="h-4 w-4" />
+              <span>Streaming Service</span>
+            </div>
+            <StreamingProviderFilter
+              providers={providers}
+              selectedProvider={filters.provider || null}
+              onProviderToggle={handleProviderToggle}
+            />
           </div>
         )}
       </div>

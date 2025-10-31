@@ -57,6 +57,7 @@ interface SearchFilters {
   order: 'asc' | 'desc';
   status?: string;
   type?: string;
+  provider?: number | null;
 }
 
 const TVShowsPage: React.FC = () => {
@@ -137,7 +138,8 @@ const TVShowsPage: React.FC = () => {
     sortBy: 'popularity',
     order: 'desc',
     status: 'all',
-    type: 'all'
+    type: 'all',
+    provider: null
   });
 
   const [watchlist, setWatchlist] = useState<string[]>([]);
@@ -567,6 +569,7 @@ const TVShowsPage: React.FC = () => {
             onAddToWatchlist={handleAddToWatchlist}
             onRemoveFromWatchlist={handleRemoveFromWatchlist}
             watchlist={watchlist}
+            onFilterChange={(newFilters) => setSearchFilters(prev => ({ ...prev, ...newFilters }))}
           />
         )}
 

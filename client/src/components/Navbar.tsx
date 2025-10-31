@@ -87,7 +87,7 @@ const Navbar: React.FC = () => {
         ? 'bg-black/95 backdrop-blur-md border-b border-white/10' 
         : 'bg-black/90 backdrop-blur-sm border-b border-white/5'
     }`}>
-      <div className="container mx-auto flex h-20 items-center px-6">
+      <div className=" flex h-20 items-center px-6">
         {/* Logo */}
         <div 
           className="flex items-center cursor-pointer select-none" 

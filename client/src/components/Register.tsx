@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { Button } from './ui/button';
@@ -6,6 +6,7 @@ import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Film, UserPlus } from 'lucide-react';
+import api from '../services/api';
 
 const Register: React.FC = () => {
   const [username, setUsername] = useState('');
@@ -14,8 +15,28 @@ const Register: React.FC = () => {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [popularMovies, setPopularMovies] = useState<Array<{ _id?: string; title: string; posterPath?: string }>>([]);
+  const [moviesLoading, setMoviesLoading] = useState(true);
   const navigate = useNavigate();
   const { register } = useAuth();
+
+  useEffect(() => {
+    let isMounted = true;
+    setMoviesLoading(true);
+    (async () => {
+      try {
+        const res = await api.get('/api/movies/popular?limit=12');
+        const movies = res.data?.movies || res.data?.data?.movies || [];
+        if (isMounted) {
+          setPopularMovies(movies);
+          setMoviesLoading(false);
+        }
+      } catch (_) {
+        if (isMounted) setMoviesLoading(false);
+      }
+    })();
+    return () => { isMounted = false; };
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -44,28 +65,84 @@ const Register: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-black flex items-center justify-center px-4">
-      {/* Background Pattern */}
-      <div className="absolute inset-0 bg-gradient-to-br from-gray-900 via-black to-gray-900">
-        <div className="absolute inset-0 bg-black/50"></div>
-      </div>
-      
-      {/* Content */}
-      <div className="relative z-10 w-full max-w-md">
+    <div className="min-h-screen bg-black px-4 py-8">
+      <div className="mx-auto max-w-6xl grid grid-cols-1 lg:grid-cols-2 gap-8 items-stretch">
+        {/* Left: Visual grid of popular movies (lg only) */}
+        <div className="hidden lg:flex">
+          <div className="bg-black border border-gray-800 rounded-none p-6 w-full h-full relative overflow-hidden">
+            {/* Subtle background pattern */}
+            <div className="absolute inset-0 opacity-5">
+              <div className="absolute inset-0 bg-[repeating-linear-gradient(45deg,transparent,transparent_10px,rgba(255,255,255,0.05)_10px,rgba(255,255,255,0.05)_20px)]"></div>
+            </div>
+            
+            <div className="relative z-10 flex flex-col h-full">
+              <div className="flex items-center justify-between mb-6 pb-4 border-b border-gray-800">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-red-600 border border-gray-700">
+                    <Film className="w-5 h-5 text-white" />
+                  </div>
+                  <h2 className="text-white font-bold text-lg uppercase tracking-wide">Popular Picks</h2>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="w-2 h-2 bg-green-600"></div>
+                  <span className="text-xs text-gray-500 uppercase tracking-wider">Live</span>
+                </div>
+              </div>
+              <div className="grid grid-cols-3 grid-rows-3 gap-2 flex-1">
+                {moviesLoading ? (
+                  Array.from({ length: 9 }).map((_, idx) => (
+                    <div key={`skeleton-${idx}`} className="relative overflow-hidden border border-gray-900 bg-gray-950">
+                      <div className="w-full h-full bg-gradient-to-br from-gray-900 to-gray-950 animate-pulse"></div>
+                    </div>
+                  ))
+                ) : (
+                  <>
+                    {popularMovies.slice(0, 9).map((m, idx) => (
+                      <div key={(m._id || m.title || 'movie') + idx} className="group relative overflow-hidden border border-gray-900 bg-gray-950 hover:border-gray-800 transition-all duration-200">
+                        <img
+                          src={m.posterPath ? `https://image.tmdb.org/t/p/w300${m.posterPath}` : '/placeholder-movie.jpg'}
+                          alt={m.title}
+                          className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
+                          onError={(e) => { (e.currentTarget as HTMLImageElement).src = '/placeholder-movie.jpg'; }}
+                        />
+                        {/* Hover overlay with title */}
+                        <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-end">
+                          <div className="p-2 w-full">
+                            <div className="text-[10px] font-bold text-white uppercase tracking-wide line-clamp-2">{m.title}</div>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                    {popularMovies.length === 0 && (
+                      <div className="col-span-3 row-span-3 flex items-center justify-center text-sm text-gray-600 uppercase tracking-wide">No items to display</div>
+                    )}
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Right: Auth card */}
+        <div className="w-full max-w-md mx-auto flex flex-col justify-center">
         {/* Logo */}
         <div className="text-center mb-8">
           <div className="flex items-center justify-center gap-3 mb-4">
-            <div className="w-12 h-12 bg-gradient-to-r from-red-600 to-red-700 rounded-lg flex items-center justify-center">
-              <Film className="w-7 h-7 text-white" />
+            <div className="w-14 h-14 bg-red-600 border border-gray-700 flex items-center justify-center">
+              <Film className="w-8 h-8 text-white" />
             </div>
-            <h1 className="text-3xl font-bold text-white bg-gradient-to-r from-white to-gray-300 bg-clip-text text-transparent">
+            <h1 className="text-3xl font-bold text-white uppercase tracking-wider">
               MovieStream
             </h1>
           </div>
-          <p className="text-gray-400 text-sm">Your gateway to unlimited entertainment</p>
+          <div className="flex items-center justify-center gap-2">
+            <div className="w-1 h-1 bg-red-600"></div>
+            <p className="text-gray-500 text-xs uppercase tracking-widest">Your Gateway to Entertainment</p>
+            <div className="w-1 h-1 bg-red-600"></div>
+          </div>
         </div>
 
-        <Card className="w-full bg-gray-800/90 backdrop-blur-sm border-gray-700/50 shadow-2xl">
+        <Card className="w-full bg-black border border-gray-800 rounded-none">
           <CardHeader className="space-y-1 text-center pb-6">
             <CardTitle className="text-3xl font-bold text-white">Create Account</CardTitle>
             <CardDescription className="text-gray-400 text-lg">
@@ -74,14 +151,14 @@ const Register: React.FC = () => {
           </CardHeader>
           <CardContent className="space-y-6">
             {error && (
-              <div className="p-4 rounded-lg bg-red-900/20 border border-red-500/30 text-red-400 text-sm">
+              <div className="p-4 rounded-none border border-red-900/50 text-red-400 text-sm bg-red-950/30">
                 {error}
               </div>
             )}
             
             <form onSubmit={handleSubmit} className="space-y-6">
               <div className="space-y-3">
-                <Label htmlFor="username" className="text-white font-medium">Username</Label>
+                <Label htmlFor="username" className="text-gray-300 font-bold text-sm uppercase tracking-wide">Username</Label>
                 <Input
                   id="username"
                   type="text"
@@ -90,12 +167,12 @@ const Register: React.FC = () => {
                   onChange={(e) => setUsername(e.target.value)}
                   disabled={loading}
                   required
-                  className="bg-gray-700/50 border-gray-600/50 text-white placeholder-gray-400 h-12 text-lg focus:border-red-500 focus:ring-red-500/20 transition-all duration-200"
+                  className="bg-gray-950 border border-gray-800 text-white placeholder-gray-600 h-12 text-base rounded-none focus:ring-1 focus:ring-red-600 focus:border-red-600 transition-all duration-200"
                 />
               </div>
               
               <div className="space-y-3">
-                <Label htmlFor="email" className="text-white font-medium">Email Address</Label>
+                <Label htmlFor="email" className="text-gray-300 font-bold text-sm uppercase tracking-wide">Email Address</Label>
                 <Input
                   id="email"
                   type="email"
@@ -104,12 +181,12 @@ const Register: React.FC = () => {
                   onChange={(e) => setEmail(e.target.value)}
                   disabled={loading}
                   required
-                  className="bg-gray-700/50 border-gray-600/50 text-white placeholder-gray-400 h-12 text-lg focus:border-red-500 focus:ring-red-500/20 transition-all duration-200"
+                  className="bg-gray-950 border border-gray-800 text-white placeholder-gray-600 h-12 text-base rounded-none focus:ring-1 focus:ring-red-600 focus:border-red-600 transition-all duration-200"
                 />
               </div>
               
               <div className="space-y-3">
-                <Label htmlFor="password" className="text-white font-medium">Password</Label>
+                <Label htmlFor="password" className="text-gray-300 font-bold text-sm uppercase tracking-wide">Password</Label>
                 <Input
                   id="password"
                   type="password"
@@ -118,12 +195,12 @@ const Register: React.FC = () => {
                   onChange={(e) => setPassword(e.target.value)}
                   disabled={loading}
                   required
-                  className="bg-gray-700/50 border-gray-600/50 text-white placeholder-gray-400 h-12 text-lg focus:border-red-500 focus:ring-red-500/20 transition-all duration-200"
+                  className="bg-gray-950 border border-gray-800 text-white placeholder-gray-600 h-12 text-base rounded-none focus:ring-1 focus:ring-red-600 focus:border-red-600 transition-all duration-200"
                 />
               </div>
               
               <div className="space-y-3">
-                <Label htmlFor="confirmPassword" className="text-white font-medium">Confirm Password</Label>
+                <Label htmlFor="confirmPassword" className="text-gray-300 font-bold text-sm uppercase tracking-wide">Confirm Password</Label>
                 <Input
                   id="confirmPassword"
                   type="password"
@@ -132,13 +209,13 @@ const Register: React.FC = () => {
                   onChange={(e) => setConfirmPassword(e.target.value)}
                   disabled={loading}
                   required
-                  className="bg-gray-700/50 border-gray-600/50 text-white placeholder-gray-400 h-12 text-lg focus:border-red-500 focus:ring-red-500/20 transition-all duration-200"
+                  className="bg-gray-950 border border-gray-800 text-white placeholder-gray-600 h-12 text-base rounded-none focus:ring-1 focus:ring-red-600 focus:border-red-600 transition-all duration-200"
                 />
               </div>
               
               <Button 
                 type="submit" 
-                className="w-full h-12 bg-gradient-to-r from-red-600 to-red-700 hover:from-red-700 hover:to-red-800 text-white font-semibold text-lg transition-all duration-300 transform hover:scale-[1.02] shadow-lg" 
+                className="w-full h-14 bg-red-600 hover:bg-red-700 text-white font-bold text-base uppercase tracking-wider rounded-none transition-all duration-200" 
                 disabled={loading}
               >
                 {loading ? (
@@ -170,6 +247,7 @@ const Register: React.FC = () => {
         {/* Footer */}
         <div className="text-center mt-8 text-sm text-gray-500">
           <p>© 2024 MovieStream. All rights reserved.</p>
+        </div>
         </div>
       </div>
     </div>

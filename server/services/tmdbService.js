@@ -301,6 +301,23 @@ class TMDBService {
     }
   }
 
+  // Get watch providers for movies
+  async getWatchProviders(type = 'movie') {
+    try {
+      const endpoint = type === 'movie' ? '/watch/providers/movie' : '/watch/providers/tv';
+      const response = await axios.get(`${this.baseURL}${endpoint}`, {
+        params: {
+          api_key: this.apiKey,
+          language: 'en-US'
+        }
+      });
+      return response.data;
+    } catch (error) {
+      console.error('Error fetching watch providers from TMDB:', error);
+      throw error;
+    }
+  }
+
   // Helper method to sync TV shows from TMDB to our database
   async syncTvShowsToDatabase(options = {}) {
     try {

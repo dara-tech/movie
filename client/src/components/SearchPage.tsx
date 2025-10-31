@@ -1,13 +1,15 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import api from '../services/api';
-import { Search, X, Film, Tv, Image } from 'lucide-react';
+import { Search, X, Film, Tv, Image, Loader2 } from 'lucide-react';
 import MovieCard from './MovieCard';
 import TvShowCard from './TvShowCard';
 import MovieCardSkeleton from './MovieCardSkeleton';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
 import { Input } from './ui/input';
+import { Button } from './ui/button';
+import StreamingProviderFilter from './StreamingProviderFilter';
 
 interface Movie {
   _id: string;
@@ -50,37 +52,129 @@ const SearchPage: React.FC = () => {
   const [movies, setMovies] = useState<Movie[]>([]);
   const [tvShows, setTvShows] = useState<TvShow[]>([]);
   const [loading, setLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [totalResults, setTotalResults] = useState(0);
+  const [movieCurrentPage, setMovieCurrentPage] = useState(1);
+  const [tvShowCurrentPage, setTvShowCurrentPage] = useState(1);
+  const [movieTotalPages, setMovieTotalPages] = useState(1);
+  const [tvShowTotalPages, setTvShowTotalPages] = useState(1);
   const [showImages, setShowImages] = useState(false);
+  const [selectedProvider, setSelectedProvider] = useState<number | null>(null);
+  const [providers, setProviders] = useState<Array<{provider_id: number; provider_name: string; logo_path: string}>>([]);
 
-  const performSearch = useCallback(async (searchQuery: string) => {
-    if (!searchQuery.trim()) {
+  const performSearch = useCallback(async (searchQuery: string, page: number = 1, append: boolean = false) => {
+    // If no query and no provider, clear results
+    if (!searchQuery.trim() && !selectedProvider) {
       setMovies([]);
       setTvShows([]);
+      setTotalResults(0);
       return;
     }
 
-    setLoading(true);
+    const isLoading = append ? setLoadingMore : setLoading;
+    isLoading(true);
     try {
-      const response = await api.get(`/api/search?q=${encodeURIComponent(searchQuery)}`);
-      setMovies(response.data.movies || []);
-      setTvShows(response.data.tvShows || []);
-      setTotalResults(response.data.total || 0);
+      if (searchQuery.trim()) {
+        // If there's a search query, use search endpoint
+        const params = new URLSearchParams({ 
+          q: searchQuery.trim(),
+          page: page.toString(),
+          limit: '20'
+        });
+        if (selectedProvider) {
+          params.append('provider', selectedProvider.toString());
+        }
+        const response = await api.get(`/api/search?${params}`);
+        const responseData = response.data;
+        
+        if (append) {
+          setMovies(prev => [...prev, ...(responseData.movies || [])]);
+          setTvShows(prev => [...prev, ...(responseData.tvShows || [])]);
+        } else {
+          setMovies(responseData.movies || []);
+          setTvShows(responseData.tvShows || []);
+          setMovieCurrentPage(1);
+          setTvShowCurrentPage(1);
+        }
+        
+        const totalItems = responseData.total || 0;
+        const combinedTotalPages = responseData.totalPages || 1;
+        
+        // For search results, we need a combined load more since the API returns them together
+        setTotalResults(totalItems);
+        setMovieTotalPages(combinedTotalPages);
+        setTvShowTotalPages(combinedTotalPages);
+      } else if (selectedProvider) {
+        // If no query but provider is selected, browse by provider
+        const [moviesResponse, tvShowsResponse] = await Promise.all([
+          api.get(`/api/movies?provider=${selectedProvider}&limit=20&page=${page}`).catch(() => ({ data: { movies: [], total: 0, totalPages: 1 } })),
+          api.get(`/api/tvshows?provider=${selectedProvider}&limit=20&page=${page}`).catch(() => ({ data: { tvShows: [], total: 0, totalPages: 1 } }))
+        ]);
+        
+        const movies = moviesResponse.data.movies || [];
+        const tvShows = tvShowsResponse.data.tvShows || [];
+        const moviesTotal = moviesResponse.data.total || 0;
+        const tvShowsTotal = tvShowsResponse.data.total || 0;
+        const moviePages = moviesResponse.data.totalPages || 1;
+        const tvShowPages = tvShowsResponse.data.totalPages || 1;
+        
+        if (append) {
+          setMovies(prev => [...prev, ...movies]);
+          setTvShows(prev => [...prev, ...tvShows]);
+        } else {
+          setMovies(movies);
+          setTvShows(tvShows);
+          setMovieCurrentPage(1);
+          setTvShowCurrentPage(1);
+        }
+        setTotalResults(moviesTotal + tvShowsTotal);
+        setMovieTotalPages(moviePages);
+        setTvShowTotalPages(tvShowPages);
+      }
     } catch (error) {
       console.error('Error searching:', error);
       showToast('Failed to search. Please try again.', 'error');
     } finally {
-      setLoading(false);
+      isLoading(false);
     }
-  }, [showToast]);
+  }, [showToast, selectedProvider]);
+
+  // Fetch watch providers
+  useEffect(() => {
+    const fetchProviders = async () => {
+      try {
+        const [moviesResponse, tvShowsResponse] = await Promise.all([
+          api.get('/api/movies/watch-providers').catch(() => ({ data: { providers: [] } })),
+          api.get('/api/tvshows/watch-providers').catch(() => ({ data: { providers: [] } }))
+        ]);
+        
+        // Combine providers from both sources, deduplicate by provider_id
+        const moviesProviders = moviesResponse.data.providers || [];
+        const tvShowsProviders = tvShowsResponse.data.providers || [];
+        const combined = [...moviesProviders];
+        
+        tvShowsProviders.forEach((tvProvider: typeof tvShowsProviders[0]) => {
+          if (!combined.find(p => p.provider_id === tvProvider.provider_id)) {
+            combined.push(tvProvider);
+          }
+        });
+        
+        setProviders(combined);
+      } catch (error) {
+        console.error('Failed to fetch watch providers:', error);
+      }
+    };
+    fetchProviders();
+  }, []);
 
   useEffect(() => {
-    if (query.trim()) {
-      performSearch(query.trim());
-    }
-  }, [searchParams, performSearch, query]);
+    // Trigger search when query changes OR provider changes
+    setMovieCurrentPage(1);
+    setTvShowCurrentPage(1);
+    performSearch(query.trim(), 1, false);
+  }, [searchParams, performSearch, query, selectedProvider]);
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
@@ -121,6 +215,7 @@ const SearchPage: React.FC = () => {
     setTvShows([]);
     setSuggestions([]);
     setShowSuggestions(false);
+    setSelectedProvider(null);
     setSearchParams({});
   };
 
@@ -154,6 +249,32 @@ const SearchPage: React.FC = () => {
       } else {
         showToast('Failed to add to watchlist. Please try again.', 'error');
       }
+    }
+  };
+
+  const handleLoadMore = () => {
+    // For search, we increment a combined counter since the API returns both together
+    const nextPage = movieCurrentPage < tvShowCurrentPage ? tvShowCurrentPage + 1 : movieCurrentPage + 1;
+    if (!loadingMore && nextPage <= movieTotalPages) {
+      setMovieCurrentPage(nextPage);
+      setTvShowCurrentPage(nextPage);
+      performSearch(query.trim(), nextPage, true);
+    }
+  };
+
+  const handleLoadMoreMovies = () => {
+    if (!loadingMore && movieCurrentPage < movieTotalPages) {
+      const nextPage = movieCurrentPage + 1;
+      setMovieCurrentPage(nextPage);
+      performSearch(query.trim(), nextPage, true);
+    }
+  };
+
+  const handleLoadMoreTvShows = () => {
+    if (!loadingMore && tvShowCurrentPage < tvShowTotalPages) {
+      const nextPage = tvShowCurrentPage + 1;
+      setTvShowCurrentPage(nextPage);
+      performSearch(query.trim(), nextPage, true);
     }
   };
 
@@ -205,10 +326,47 @@ const SearchPage: React.FC = () => {
               </div>
             )}
           </form>
+
+          {/* Advanced Filters Section - Under Search Bar */}
+          <div className="mt-6 space-y-4">
+            {/* Streaming Provider Filter */}
+            {providers.length > 0 && (
+              <div className="space-y-3">
+                <div className="flex items-center gap-2 text-sm text-gray-400">
+                  <Tv className="h-4 w-4" />
+                  <span className="uppercase tracking-wider">Streaming Service</span>
+                  {selectedProvider && (
+                    <button
+                      onClick={() => setSelectedProvider(null)}
+                      className="ml-auto text-xs text-red-500 hover:text-red-400 uppercase tracking-wider"
+                    >
+                      Clear Filter
+                    </button>
+                  )}
+                </div>
+                <div className="bg-gray-900/50 border border-gray-800/50 p-4">
+                  <StreamingProviderFilter
+                    providers={providers}
+                    selectedProvider={selectedProvider}
+                    onProviderToggle={(providerId) => setSelectedProvider(providerId)}
+                    className=""
+                  />
+                </div>
+                {selectedProvider && (
+                  <div className="text-xs text-gray-500 flex items-center gap-2">
+                    <span>Filtering by:</span>
+                    <span className="text-white font-semibold">
+                      {providers.find(p => p.provider_id === selectedProvider)?.provider_name || 'Selected service'}
+                    </span>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Results */}
-        {query && (
+        {(query || selectedProvider) && (
           <div className="space-y-8">
             {loading ? (
               <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6">
@@ -222,7 +380,13 @@ const SearchPage: React.FC = () => {
                 {totalResults > 0 && (
                   <div className="flex items-center justify-between">
                     <div className="text-gray-400">
-                      Found <span className="text-white font-semibold">{totalResults}</span> result{totalResults !== 1 ? 's' : ''} for <span className="text-white font-semibold">"{query}"</span>
+                      {query ? (
+                        <>Found <span className="text-white font-semibold">{totalResults}</span> result{totalResults !== 1 ? 's' : ''} for <span className="text-white font-semibold">"{query}"</span></>
+                      ) : selectedProvider ? (
+                        <>Found <span className="text-white font-semibold">{totalResults}</span> result{totalResults !== 1 ? 's' : ''} on <span className="text-white font-semibold">{providers.find(p => p.provider_id === selectedProvider)?.provider_name || 'selected service'}</span></>
+                      ) : (
+                        <>Found <span className="text-white font-semibold">{totalResults}</span> result{totalResults !== 1 ? 's' : ''}</>
+                      )}
                     </div>
                     <button
                       onClick={() => setShowImages(!showImages)}
@@ -251,6 +415,26 @@ const SearchPage: React.FC = () => {
                         />
                       ))}
                     </div>
+                    
+                    {/* Load More Movies Button */}
+                    {movieCurrentPage < movieTotalPages && (
+                      <div className="flex justify-center mt-6">
+                        <Button
+                          onClick={handleLoadMoreMovies}
+                          disabled={loadingMore}
+                          className="bg-red-600 hover:bg-red-700 text-white font-semibold py-2 px-8 rounded-none transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          {loadingMore ? (
+                            <>
+                              <Loader2 className="h-5 w-5 animate-spin mr-2" />
+                              Loading...
+                            </>
+                          ) : (
+                            `Load More Movies (${movies.length} / ${totalResults})`
+                          )}
+                        </Button>
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -271,6 +455,26 @@ const SearchPage: React.FC = () => {
                         />
                       ))}
                     </div>
+                    
+                    {/* Load More TV Shows Button */}
+                    {tvShowCurrentPage < tvShowTotalPages && (
+                      <div className="flex justify-center mt-6">
+                        <Button
+                          onClick={handleLoadMoreTvShows}
+                          disabled={loadingMore}
+                          className="bg-red-600 hover:bg-red-700 text-white font-semibold py-2 px-8 rounded-none transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          {loadingMore ? (
+                            <>
+                              <Loader2 className="h-5 w-5 animate-spin mr-2" />
+                              Loading...
+                            </>
+                          ) : (
+                            `Load More TV Shows (${tvShows.length} / ${totalResults})`
+                          )}
+                        </Button>
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -288,7 +492,7 @@ const SearchPage: React.FC = () => {
         )}
 
         {/* Empty State */}
-        {!query && (
+        {!query && !selectedProvider && (
           <div className="text-center py-16">
             <Search className="h-24 w-24 text-gray-700 mx-auto mb-6 opacity-50" />
             <h2 className="text-3xl font-bold text-white mb-4">Search for anything</h2>

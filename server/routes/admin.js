@@ -1,12 +1,14 @@
 const express = require('express');
 const router = express.Router();
 const { requireAdmin, requireSuperAdmin, requirePermission } = require('../middleware/adminAuth');
+const { createActivityLogger } = require('../middleware/activityLogger');
 const User = require('../models/User');
 const Movie = require('../models/Movie');
 const TvShow = require('../models/TvShow');
 const Genre = require('../models/Genre');
 const Watchlist = require('../models/Watchlist');
 const WatchHistory = require('../models/WatchHistory');
+const AdminActivity = require('../models/AdminActivity');
 
 // Apply admin middleware to all routes
 router.use(requireAdmin);
@@ -170,7 +172,7 @@ router.get('/users/:id', async (req, res) => {
 });
 
 // Update user
-router.put('/users/:id', async (req, res) => {
+router.put('/users/:id', createActivityLogger.userUpdate(), async (req, res) => {
   try {
     const { role, isActive, profile, preferences } = req.body;
     
@@ -198,7 +200,7 @@ router.put('/users/:id', async (req, res) => {
 });
 
 // Delete user (soft delete)
-router.delete('/users/:id', async (req, res) => {
+router.delete('/users/:id', createActivityLogger.userDelete(), async (req, res) => {
   try {
     const user = await User.findByIdAndUpdate(
       req.params.id,
@@ -306,7 +308,7 @@ router.get('/movies', async (req, res) => {
 });
 
 // Update movie availability
-router.put('/movies/:id/availability', async (req, res) => {
+router.put('/movies/:id/availability', createActivityLogger.movieAvailability(), async (req, res) => {
   try {
     const { isAvailable } = req.body;
     
@@ -328,7 +330,7 @@ router.put('/movies/:id/availability', async (req, res) => {
 });
 
 // Delete movie
-router.delete('/movies/:id', async (req, res) => {
+router.delete('/movies/:id', createActivityLogger.movieDelete(), async (req, res) => {
   try {
     const movie = await Movie.findByIdAndDelete(req.params.id);
     
@@ -448,7 +450,7 @@ router.get('/tvshows', async (req, res) => {
 });
 
 // Update TV show availability
-router.put('/tvshows/:id/availability', async (req, res) => {
+router.put('/tvshows/:id/availability', createActivityLogger.tvshowAvailability(), async (req, res) => {
   try {
     const { isAvailable } = req.body;
     
@@ -470,7 +472,7 @@ router.put('/tvshows/:id/availability', async (req, res) => {
 });
 
 // Delete TV show
-router.delete('/tvshows/:id', async (req, res) => {
+router.delete('/tvshows/:id', createActivityLogger.tvshowDelete(), async (req, res) => {
   try {
     const tvShow = await TvShow.findByIdAndDelete(req.params.id);
     
@@ -494,7 +496,7 @@ router.delete('/tvshows/:id', async (req, res) => {
 // ==================== GENRE MANAGEMENT ====================
 
 // Delete genre
-router.delete('/genres/:id', async (req, res) => {
+router.delete('/genres/:id', createActivityLogger.genreDelete(), async (req, res) => {
   try {
     const Genre = require('../models/Genre');
     const TvShow = require('../models/TvShow');
@@ -681,6 +683,156 @@ router.get('/analytics/content', async (req, res) => {
   } catch (error) {
     console.error('Content analytics error:', error);
     res.status(500).json({ success: false, message: 'Failed to get content analytics' });
+  }
+});
+
+// ==================== ADMIN ACTIVITY LOGS ====================
+
+// Get admin activity logs
+router.get('/activity', async (req, res) => {
+  try {
+    const {
+      page = 1,
+      limit = 50,
+      adminId,
+      action,
+      resource,
+      success,
+      startDate,
+      endDate
+    } = req.query;
+
+    const query = {};
+    
+    if (adminId) {
+      query.admin = adminId;
+    }
+    
+    if (action) {
+      query.action = action;
+    }
+    
+    if (resource) {
+      query.resource = resource;
+    }
+    
+    if (success !== undefined) {
+      query.success = success === 'true';
+    }
+    
+    if (startDate || endDate) {
+      query.createdAt = {};
+      if (startDate) query.createdAt.$gte = new Date(startDate);
+      if (endDate) query.createdAt.$lte = new Date(endDate);
+    }
+
+    const activities = await AdminActivity.find(query)
+      .sort({ createdAt: -1 })
+      .limit(limit * 1)
+      .skip((page - 1) * limit);
+
+    const total = await AdminActivity.countDocuments(query);
+
+    res.json({
+      success: true,
+      data: {
+        activities,
+        pagination: {
+          totalPages: Math.ceil(total / limit),
+          currentPage: parseInt(page),
+          total
+        }
+      }
+    });
+  } catch (error) {
+    console.error('Get admin activity error:', error);
+    res.status(500).json({ success: false, message: 'Failed to fetch activity logs' });
+  }
+});
+
+// Get activity statistics
+router.get('/activity/stats', async (req, res) => {
+  try {
+    const { period = '30d' } = req.query;
+    
+    let startDate = new Date();
+    switch (period) {
+      case '7d':
+        startDate.setDate(startDate.getDate() - 7);
+        break;
+      case '30d':
+        startDate.setDate(startDate.getDate() - 30);
+        break;
+      case '90d':
+        startDate.setDate(startDate.getDate() - 90);
+        break;
+      case '1y':
+        startDate.setFullYear(startDate.getFullYear() - 1);
+        break;
+    }
+
+    const [
+      totalActivities,
+      successActivities,
+      failedActivities,
+      activitiesByAction,
+      activitiesByAdmin,
+      recentActivities
+    ] = await Promise.all([
+      AdminActivity.countDocuments({ createdAt: { $gte: startDate } }),
+      AdminActivity.countDocuments({ createdAt: { $gte: startDate }, success: true }),
+      AdminActivity.countDocuments({ createdAt: { $gte: startDate }, success: false }),
+      AdminActivity.aggregate([
+        { $match: { createdAt: { $gte: startDate } } },
+        { $group: { _id: '$action', count: { $sum: 1 } } },
+        { $sort: { count: -1 } },
+        { $limit: 10 }
+      ]),
+      AdminActivity.aggregate([
+        { $match: { createdAt: { $gte: startDate } } },
+        { $group: { _id: '$admin', count: { $sum: 1 } } },
+        { $sort: { count: -1 } },
+        { $limit: 10 },
+        { $lookup: { from: 'users', localField: '_id', foreignField: '_id', as: 'admin' } },
+        { $unwind: '$admin' },
+        { $project: { 'admin.username': 1, 'admin.email': 1, count: 1 } }
+      ]),
+      AdminActivity.find({ createdAt: { $gte: startDate } })
+        .limit(10)
+        .sort({ createdAt: -1 })
+    ]);
+
+    res.json({
+      success: true,
+      data: {
+        total: totalActivities,
+        success: successActivities,
+        failed: failedActivities,
+        successRate: totalActivities > 0 ? ((successActivities / totalActivities) * 100).toFixed(2) : 0,
+        byAction: activitiesByAction,
+        byAdmin: activitiesByAdmin,
+        recent: recentActivities
+      }
+    });
+  } catch (error) {
+    console.error('Get activity stats error:', error);
+    res.status(500).json({ success: false, message: 'Failed to get activity statistics' });
+  }
+});
+
+// Get activity by ID
+router.get('/activity/:id', async (req, res) => {
+  try {
+    const activity = await AdminActivity.findById(req.params.id);
+    
+    if (!activity) {
+      return res.status(404).json({ success: false, message: 'Activity not found' });
+    }
+
+    res.json({ success: true, data: activity });
+  } catch (error) {
+    console.error('Get activity error:', error);
+    res.status(500).json({ success: false, message: 'Failed to fetch activity' });
   }
 });
 

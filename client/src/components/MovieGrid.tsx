@@ -83,15 +83,25 @@ const MovieGrid: React.FC<MovieGridProps> = ({
 
   return (
     <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
-      {safeMovies.map((movie) => (
-        <MovieCard
-          key={movie._id}
-          movie={movie}
-          onPlay={onPlay}
-          onAddToWatchlist={onAddToWatchlist}
-          isInWatchlist={watchlist.includes(movie._id)}
-        />
-      ))}
+      {safeMovies
+        .filter((m): m is Movie => Boolean(m))
+        .map((movie, index) => {
+          const anyMovie: any = movie as any;
+          const synthesizedId = String(
+            anyMovie?._id || anyMovie?.id || anyMovie?.tmdbId || `${movie.title || 'movie'}-${index}`
+          );
+          const normalizedMovie = { ...(movie as any), _id: synthesizedId } as Movie;
+
+          return (
+            <MovieCard
+              key={synthesizedId}
+              movie={normalizedMovie}
+              onPlay={onPlay}
+              onAddToWatchlist={onAddToWatchlist}
+              isInWatchlist={watchlist.includes(synthesizedId)}
+            />
+          );
+        })}
     </div>
   );
 };
